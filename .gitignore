@@ -37,3 +37,6 @@ config/projects/*.yaml
 data/
 public/uploads/
 *.tsbuildinfo
+
+# file backup (có thể chứa token)
+*.bak*
