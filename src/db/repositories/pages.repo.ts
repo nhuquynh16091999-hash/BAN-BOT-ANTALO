@@ -6,7 +6,7 @@ import type { Page } from "../../domain/types.js";
 const COLS = `
     id, page_id, page_name, market, utc_offset, pancake_shop_id, is_active,
     health_state, paused_until, pause_reason, pause_count_24h,
-    activated_at, ramp_percent, last_synced_at, last_planned_at
+    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at
 `;
 
 export function listAll(): Promise<Page[]> {
@@ -66,8 +66,17 @@ export async function setActive(id: number, active: boolean, rampStartPercent: n
     }
 }
 
-export async function markSynced(id: number): Promise<void> {
-    await query(`UPDATE pages SET last_synced_at = now() WHERE id = $1`, [id]);
+/** Quét đầy đủ xong. Quét đầy đủ đã bao cả phần quét nhanh nên dời luôn mốc đó. */
+export async function markSynced(id: number, at: Date): Promise<void> {
+    await query(`UPDATE pages SET last_synced_at = $2, last_quick_synced_at = $2 WHERE id = $1`, [id, at.toISOString()]);
+}
+
+/**
+ * Quét nhanh xong. `at` là lúc BẮT ĐẦU quét, không phải lúc xong: hội thoại
+ * phát sinh trong lúc đang quét sẽ được lượt sau lấy lại.
+ */
+export async function markQuickSynced(id: number, at: Date): Promise<void> {
+    await query(`UPDATE pages SET last_quick_synced_at = $2 WHERE id = $1`, [id, at.toISOString()]);
 }
 
 export async function markPlanned(id: number): Promise<void> {

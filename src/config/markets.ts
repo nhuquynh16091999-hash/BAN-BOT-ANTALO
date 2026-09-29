@@ -22,6 +22,7 @@ export const MARKETS = {
     Bahrain: { key: "Bahrain", label: "Bahrain",      city: "Manama",     utcOffset: 3, flag: "🇧🇭" },
     Japan:   { key: "Japan",   label: "Nhật Bản",     city: "Tokyo",      utcOffset: 9, flag: "🇯🇵" },
     Taiwan:  { key: "Taiwan",  label: "Đài Loan",     city: "Đài Bắc",    utcOffset: 8, flag: "🇹🇼" },
+    Singapore: { key: "Singapore", label: "Singapore", city: "Singapore", utcOffset: 8, flag: "🇸🇬" },
 } as const satisfies Record<string, Market>;
 
 export type MarketKey = keyof typeof MARKETS;

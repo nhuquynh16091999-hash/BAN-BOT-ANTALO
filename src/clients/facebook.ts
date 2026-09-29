@@ -26,12 +26,23 @@ const cache: { byId: Map<string, string>; byName: Map<string, string>; expiresAt
     expiresAt: 0,
 };
 
-async function loadPages(): Promise<void> {
-    if (cache.expiresAt > Date.now()) return;
-    if (!config.facebook.enabled) return;
+// Job SEND chạy nhiều page song song, nên nhiều lời gọi có thể cùng lúc thấy cache
+// hết hạn. Gộp chúng vào MỘT lượt tải: nếu mỗi lời gọi tự xoá rồi nạp lại, một
+// page có thể đọc đúng lúc cache vừa bị lời gọi khác xoá và tưởng không có token.
+let loading: Promise<void> | null = null;
 
-    cache.byId.clear();
-    cache.byName.clear();
+function loadPages(): Promise<void> {
+    if (cache.expiresAt > Date.now()) return Promise.resolve();
+    if (!config.facebook.enabled) return Promise.resolve();
+    loading ??= fetchPages().finally(() => {
+        loading = null;
+    });
+    return loading;
+}
+
+async function fetchPages(): Promise<void> {
+    const byId = new Map<string, string>();
+    const byName = new Map<string, string>();
 
     let url: string =
         `${graph()}/me/accounts?access_token=${config.facebook.userToken}&limit=100&fields=id,name,access_token`;
@@ -51,8 +62,8 @@ async function loadPages(): Promise<void> {
             }
             for (const p of data.data ?? []) {
                 if (!p.access_token) continue;
-                cache.byId.set(String(p.id), p.access_token);
-                if (p.name) cache.byName.set(p.name.toLowerCase().trim(), p.access_token);
+                byId.set(String(p.id), p.access_token);
+                if (p.name) byName.set(p.name.toLowerCase().trim(), p.access_token);
                 count++;
             }
             url = data.paging?.next ?? "";
@@ -61,6 +72,9 @@ async function loadPages(): Promise<void> {
         log.error({ err: err instanceof Error ? err.message : String(err) }, "Không nạp được danh sách page Facebook");
     }
 
+    // Tráo cả bảng một lần — người đang đọc không bao giờ thấy bảng rỗng dở dang
+    cache.byId = byId;
+    cache.byName = byName;
     // Có kết quả thì nhớ 1 giờ; rỗng (token hỏng?) thì chỉ 1 phút để sớm thử lại
     cache.expiresAt = Date.now() + (count > 0 ? 3_600_000 : 60_000);
     log.info({ count }, "Đã nạp page token từ Facebook");

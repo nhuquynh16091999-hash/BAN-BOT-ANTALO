@@ -1,10 +1,12 @@
 # Bắn bot TALPHA v2
 
-Hệ thống nuôi dưỡng khách qua Messenger. Mỗi đêm tự làm mới tệp khách từ Pancake;
-mỗi khách đi một hành trình **7 ngày** của riêng mình, nhận **4 tin/ngày** (6h · 11h · 17h · 21h
-giờ địa phương), xoay vòng trên **12 nội dung**; dừng khi khách **chốt đơn** hoặc **nhắn từ chối**.
+Hệ thống nuôi dưỡng khách qua Messenger. Mỗi đêm quét lại toàn bộ tệp khách từ Pancake, và
+cứ 15 phút quét nhanh để **khách vừa nhắn vào chuỗi ngay trong ngày**. Mỗi khách đi một hành
+trình **7 ngày** của riêng mình, nhận **4 tin/ngày** (6h · 11h · 17h · 21h giờ địa phương),
+xoay vòng trên **12 nội dung**; dừng khi khách **chốt đơn** (đơn POS · tag · **để lại SĐT**)
+hoặc **nhắn từ chối**.
 
-Bản thiết kế đầy đủ: xem artifact *Bắn bot TALPHA v2* (8 quyết định đã chốt, sơ đồ 4 tiến trình, bảng xoay vòng).
+Nghiệp vụ đang áp dụng (chốt 29/09/2026 qua bộ 20 câu hỏi): **[docs/NGHIEP-VU.md](docs/NGHIEP-VU.md)**.
 
 ---
 
@@ -67,7 +69,7 @@ Dùng cho máy dev; trên VPS dùng Postgres cài đặt thật.
 ## Kiểm tra
 
 ```bash
-npm run test:smoke          # 195 kiểm tra tích hợp trên Postgres nhúng tạm
+npm run test:smoke          # 309 kiểm tra tích hợp trên Postgres nhúng tạm
 ```
 
 Bộ kiểm tra dựng DB sạch, chạy migration, rồi đi qua đúng luồng SYNC → PLAN → SEND →
@@ -105,12 +107,15 @@ npm run job:sync -- --page 123456789
 # 5. Xem thử sẽ xếp bao nhiêu lượt hôm nay, chưa ghi gì
 npm run job:plan -- --page 123456789 --force --dry-run
 
-# 6. Bật. Page mới gửi 25% tệp trong 3 ngày đầu rồi tăng dần lên 100%
+# 6. Bật. Page mới gửi đủ tệp ngay (muốn khởi động dần: RAMP_UP_DAYS=3 trong .env)
 npm run page:add -- --page 123456789 --market Saudi --activate
 ```
 
-Thị trường có sẵn: Saudi · UAE · Kuwait · Oman · Qatar · Bahrain · Japan · Taiwan
+Thị trường có sẵn: Saudi · UAE · Kuwait · Oman · Qatar · Bahrain · Taiwan · Singapore · Japan
 (thị trường khác: thêm `--offset <giờ UTC>`).
+
+Đã có một page chạy tốt? Trên giao diện chính, màn **Kịch bản tự động** có ô
+**"Chép từ page khác…"** — đổ 12 tin của page đó vào để sửa lại cho page mới, bấm Lưu mới ghi.
 
 ## Chạy trên VPS
 
@@ -125,8 +130,8 @@ Không dùng pm2? Xem `deploy/crontab.example` + `deploy/banbot-webhook.service`
 
 | Job     | Lịch          | Làm gì                                                        |
 |---------|---------------|---------------------------------------------------------------|
-| sync    | mỗi giờ       | tự chọn page đang ở `SYNC_HOUR_LOCAL` (3h) giờ địa phương → quét Pancake → gọi plan |
-| send    | mỗi 5 phút    | lấy lượt tới hạn, gửi theo lô, ngân sách 4,5 phút/lượt        |
+| sync    | mỗi 15 phút   | page đang ở `SYNC_HOUR_LOCAL` (3h) giờ địa phương hoặc chưa từng đồng bộ → quét đầy đủ; page khác → quét nhanh hội thoại mới → gọi plan |
+| send    | mỗi phút      | lấy lượt tới hạn, gửi theo lô, tối đa `SEND_PAGE_CONCURRENCY` (10) page song song, ngân sách 4,5 phút/lượt |
 | pos     | mỗi 15 phút   | đối chiếu đơn từ Pancake POS → dừng chuỗi cho khách vừa chốt   |
 | health  | mỗi 15 phút   | đọc `send_log` 60 phút → pause / degrade / recover từng page   |
 | webhook | liên tục      | `POST /webhook/message` · `POST /webhook/order` · `GET /health` |
@@ -195,11 +200,12 @@ trên database dev.
 
 ## Bắt đơn tự động (POS)
 
-Hệ thống nhận biết khách đã chốt qua **ba** đường, đường nào tới trước thì dừng chuỗi:
+Hệ thống nhận biết khách đã chốt qua **bốn** đường, đường nào tới trước thì dừng chuỗi:
 
 | Đường | Cần gì | Ghi chú |
 |---|---|---|
 | Tag mua hàng | nhân viên gắn tag lên hội thoại | chạy trong job `sync`, danh sách tag ở `src/domain/rules.ts` |
+| **Khách để lại SĐT** | không cần gì | chạy trong job `sync`. Chỉ tính SĐT để lại **trong chuỗi này** — khách quay lại mang SĐT cũ vẫn được nuôi dưỡng. Tắt: `CONVERT_ON_PHONE=false` |
 | Webhook đơn | ai đó nối hệ thống ngoài gọi `/webhook/order` | tức thì |
 | **POS** | `config/pos-shops.json` | tự động, không cần ai đổi thói quen |
 
@@ -264,7 +270,7 @@ UPDATE pages SET is_active = FALSE WHERE page_id = '123456789';
 ## Cấu trúc
 
 ```
-migrations/                  001_init.sql (schema gốc) · 002_pos.sql (mốc chuẩn POS)
+migrations/                  001_init (schema gốc) · 002_pos (mốc chuẩn POS) · 003–004 · 005 (nghiệp vụ 29/09: SĐT, quét nhanh)
 src/config/                  env (zod) · bảng múi giờ thị trường
 src/domain/                  journey.ts (công thức xoay vòng) · rules.ts (tag mua hàng, từ khoá từ chối) · types.ts
 src/clients/                 pancake.ts (quét + gửi chính) · facebook.ts (dự phòng, thang 4 tag) · pos.ts (đơn hàng)
@@ -272,7 +278,7 @@ src/db/                      pool · migrate · repositories/ (pages, customers,
 src/jobs/                    sync · plan · send · pos · health · webhook
 src/web/                     server.ts (định tuyến) · views.ts (các trang) · html.ts (CSS + escape)
 src/scripts/                 check-db · check-tokens · page:add · page:list · script:seed
-                             smoke-test.ts (195 kiểm tra) · dev-db.ts · seed-demo.ts
+                             smoke-test.ts (309 kiểm tra) · dev-db.ts · seed-demo.ts
 config/                      pos-shops.json (gitignore, chép từ .example) — khoá POS từng shop
 kich-ban/                    nội dung kịch bản (mau.json là khung)
 deploy/                      crontab + systemd mẫu

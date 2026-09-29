@@ -29,11 +29,18 @@ export interface PlanStats extends Record<string, unknown> {
     skippedOutOfWindow: number;
 }
 
-/** Phần trăm tệp được gửi hôm nay theo lịch khởi động dần. */
-export function rampPercentFor(page: Page, now: Date = new Date()): number {
+/**
+ * Phần trăm tệp được gửi hôm nay theo lịch khởi động dần.
+ * Mặc định tắt (RAMP_UP_DAYS=0) → luôn 100%: nghiệp vụ 29/09 chọn gửi đủ tệp ngay.
+ */
+export function rampPercentFor(
+    page: Page,
+    now: Date = new Date(),
+    ramp: { days: number; startPercent: number } = config.rampUp
+): number {
     if (!page.activated_at) return 100;
     const days = localDaysBetween(page.activated_at, now, page.utc_offset);
-    const { days: rampDays, startPercent } = config.rampUp;
+    const { days: rampDays, startPercent } = ramp;
     if (rampDays <= 0 || days >= rampDays) return 100;
     return Math.round(startPercent + ((100 - startPercent) * days) / rampDays);
 }

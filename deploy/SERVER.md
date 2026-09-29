@@ -19,7 +19,7 @@ ghi địa chỉ thật ở đây). Ubuntu 24.04, cài tại `/opt/banbot`.
 | `banbot-ui` | liên tục | giao diện chính (Next.js) |
 | `banbot-web` | liên tục | dashboard chỉ đọc |
 | `banbot-webhook` | liên tục | nhận đơn / tin khách |
-| `banbot-sync` | phút 5 mỗi giờ | đồng bộ page nào đang 3h sáng giờ địa phương |
+| `banbot-sync` | 5,20,35,50 | page đang 3h sáng giờ địa phương → quét đầy đủ; page khác → quét nhanh khách mới nhắn |
 | `banbot-send` | mỗi phút | gửi lượt tới hạn (cả theo lịch lẫn bắn tay) |
 | `banbot-pos` | 8,23,38,53 | đối chiếu đơn POS |
 | `banbot-health` | 2,17,32,47 | giám sát sức khoẻ page |
@@ -37,6 +37,10 @@ pm2 delete banbot-send && pm2 start ecosystem.config.cjs --only banbot-send && p
 ```
 
 Hoặc chạy `RELOAD_CRON=1 bash deploy/deploy.sh` để nạp lại lịch cho cả 4 job.
+
+> **Bản cập nhật nghiệp vụ 29/09/2026 đổi lịch `banbot-sync` từ mỗi giờ sang mỗi
+> 15 phút** → lần deploy đầu tiên sau bản này BẮT BUỘC dùng `RELOAD_CRON=1`, rồi
+> kiểm tra `pm2 describe banbot-sync | grep cron` phải ra `5,20,35,50 * * * *`.
 
 ## Lệnh hay dùng
 
@@ -62,7 +66,12 @@ sudo -u postgres psql -d banbot
 4. `sync` thật
 5. `add-page --activate` ← **từ đây mới thật sự gửi tin cho khách**
 
-Page mới bật chạy ở chế độ khởi động dần: 25% tệp trong 3 ngày đầu.
+Page mới bật gửi đủ tệp ngay (nghiệp vụ 29/09). Muốn khởi động dần như trước
+(25% tệp, tăng dần trong 3 ngày) thì đặt `RAMP_UP_DAYS=3` trong `.env`.
+
+Bước 3–4 vẫn nên làm để xem trước tệp khách, nhưng nếu quên: page vừa bật mà
+chưa từng đồng bộ sẽ được `banbot-sync` quét đầy đủ ở lượt kế tiếp (tối đa 15
+phút), không chờ tới 3h sáng.
 
 ## Gỡ cài đặt
 

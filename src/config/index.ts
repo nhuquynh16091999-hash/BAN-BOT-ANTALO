@@ -41,7 +41,8 @@ const schema = z.object({
 
     // ─── Database ────────────────────────────────────────────────────────
     DATABASE_URL: z.string().min(1, "DATABASE_URL bắt buộc phải có"),
-    DATABASE_POOL_MAX: int(10),
+    // 20: job SEND chạy nhiều page song song, mỗi page vài truy vấn cùng lúc
+    DATABASE_POOL_MAX: int(20),
 
     // ─── Pancake ─────────────────────────────────────────────────────────
     PANCAKE_CRM_TOKEN: z.string().min(1, "PANCAKE_CRM_TOKEN bắt buộc phải có"),
@@ -61,11 +62,20 @@ const schema = z.object({
     SEND_WINDOW_DAYS: int(7).pipe(z.number().min(1).max(7)),
     STOP_ON_REPLY: bool(false),
 
+    // ─── Nhận biết khách đã chốt ─────────────────────────────────────────
+    // Nghiệp vụ 29/09: khách để lại SĐT trong chuỗi này = đã chốt → dừng chuỗi
+    CONVERT_ON_PHONE: bool(true),
+
     // ─── Nhịp gửi ────────────────────────────────────────────────────────
     SEND_BATCH_SIZE: int(8).pipe(z.number().min(1).max(50)),
     SEND_BATCH_DELAY_MS: int(2500),
-    SEND_LATE_WINDOW_MIN: int(60),
+    // Nghiệp vụ 29/09: lỡ giờ dưới 2 tiếng thì gửi bù, quá thì bỏ
+    SEND_LATE_WINDOW_MIN: int(120),
     SEND_MAX_ATTEMPTS: int(3).pipe(z.number().min(1).max(10)),
+    // Số page gửi cùng lúc. Nhịp gửi của TỪNG page không đổi; chỉ là page này
+    // không phải xếp hàng chờ page kia gửi xong — với 20+ page, gửi lần lượt
+    // làm page cuối danh sách trễ quá cửa sổ và mất cả khung giờ.
+    SEND_PAGE_CONCURRENCY: int(10).pipe(z.number().min(1).max(50)),
 
     // ─── Sức khoẻ page ───────────────────────────────────────────────────
     HEALTH_DEGRADE_ERROR_RATE: num(0.3).pipe(z.number().min(0).max(1)),
@@ -77,11 +87,17 @@ const schema = z.object({
     HEALTH_MIN_SAMPLE: int(20),
 
     // ─── Khởi động dần ───────────────────────────────────────────────────
-    RAMP_UP_DAYS: int(3),
+    // Nghiệp vụ 29/09: page mới gửi đủ tệp ngay (0 = tắt khởi động dần).
+    // Muốn bật lại: RAMP_UP_DAYS=3, RAMP_UP_START_PERCENT=25.
+    RAMP_UP_DAYS: int(0),
     RAMP_UP_START_PERCENT: int(25).pipe(z.number().min(1).max(100)),
 
     // ─── Đồng bộ ─────────────────────────────────────────────────────────
     SYNC_HOUR_LOCAL: int(3).pipe(z.number().min(0).max(23)),
+    // Quét nhanh hội thoại mới giữa các lần quét đêm, để khách vừa nhắn vào
+    // chuỗi ngay trong ngày. Lùi thêm một khoảng chồng lấn cho khỏi sót.
+    SYNC_QUICK_ENABLED: bool(true),
+    SYNC_QUICK_OVERLAP_MIN: int(30),
     SYNC_MAX_WINDOWS: int(36),
     SYNC_MAX_CUSTOMERS_PER_PAGE: int(20_000),
     SYNC_PAGE_CONCURRENCY: int(4).pipe(z.number().min(1).max(10)),
@@ -151,11 +167,16 @@ export const config = {
         stopOnReply: env.STOP_ON_REPLY,
     },
 
+    convert: {
+        onPhone: env.CONVERT_ON_PHONE,
+    },
+
     send: {
         batchSize: env.SEND_BATCH_SIZE,
         batchDelayMs: env.SEND_BATCH_DELAY_MS,
         lateWindowMin: env.SEND_LATE_WINDOW_MIN,
         maxAttempts: env.SEND_MAX_ATTEMPTS,
+        pageConcurrency: env.SEND_PAGE_CONCURRENCY,
     },
 
     health: {
@@ -178,6 +199,8 @@ export const config = {
         maxWindows: env.SYNC_MAX_WINDOWS,
         maxCustomersPerPage: env.SYNC_MAX_CUSTOMERS_PER_PAGE,
         pageConcurrency: env.SYNC_PAGE_CONCURRENCY,
+        quickEnabled: env.SYNC_QUICK_ENABLED,
+        quickOverlapMin: env.SYNC_QUICK_OVERLAP_MIN,
     },
 
     webhook: {

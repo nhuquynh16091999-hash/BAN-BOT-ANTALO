@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 import { config } from "../config/index.js";
 import { sleep, isWithinSendWindow } from "../lib/time.js";
+import { forEachConcurrent } from "../lib/concurrency.js";
 import { runJob, withJobRun, WORKER_ID, shouldStop, isMain } from "../lib/runner.js";
 import type { Page, SendableJob, SendOutcome, SendErrorKind } from "../domain/types.js";
 import * as pancake from "../clients/pancake.js";
@@ -14,8 +15,9 @@ import * as queueRepo from "../db/repositories/queue.repo.js";
  * Lịch chạy: cron mỗi 5 phút (`npm run job:send`), hoặc `--loop` để tự lặp.
  * Mỗi lượt chạy có ngân sách thời gian 4,5 phút để không chồng lên lượt sau.
  *
- * Với từng page: lấy một lô (FOR UPDATE SKIP LOCKED — nhiều worker chạy song
- * song vẫn an toàn), gửi song song trong lô, nghỉ, lấy lô tiếp. Page đang
+ * Nhiều page được gửi song song (SEND_PAGE_CONCURRENCY). Với từng page: lấy
+ * một lô (FOR UPDATE SKIP LOCKED — nhiều worker chạy song song vẫn an toàn),
+ * gửi song song trong lô, nghỉ, lấy lô tiếp. Page đang
  * 'degraded' dùng lô nhỏ hơn và nghỉ lâu hơn. Gặp lỗi cấp page (hết cước /
  * Facebook chặn) → ngưng page ngay và bỏ qua phần còn lại của page trong lượt này.
  */
@@ -293,16 +295,25 @@ export async function runPass(log: Logger, opts: { pageId?: string | null } = {}
     const pages = opts.pageId
         ? [await pagesRepo.findByFbPageId(opts.pageId)].filter((p): p is Page => p !== null)
         : await pagesRepo.listActive();
+    const sendable = pages.filter((p) => pagesRepo.isSendable(p));
 
-    for (const page of pages) {
-        if (!pagesRepo.isSendable(page)) continue;
-        if (Date.now() > deadline || shouldStop()) break;
-        stats.pages++;
-        const plog = log.child({ pageId: page.page_id, page: page.page_name, health: page.health_state });
-        await sendForPage(page, plog, deadline, stats).catch((err) => {
-            plog.error({ err: err instanceof Error ? err.message : String(err) }, "Lỗi khi gửi cho page — sang page tiếp");
-        });
-    }
+    // Nhiều page gửi SONG SONG (tối đa SEND_PAGE_CONCURRENCY page cùng lúc).
+    // Nhịp gửi của từng page (lô, nghỉ giữa lô, hãm tốc) giữ nguyên — Facebook
+    // giới hạn theo page nên chạy song song không làm page nào gửi dồn hơn.
+    // Gửi lần lượt thì với 20+ page, page cuối danh sách chờ tới lúc lượt của
+    // nó quá cửa sổ trễ và mất trắng cả khung giờ.
+    await forEachConcurrent(
+        sendable,
+        config.send.pageConcurrency,
+        async (page) => {
+            stats.pages++;
+            const plog = log.child({ pageId: page.page_id, page: page.page_name, health: page.health_state });
+            await sendForPage(page, plog, deadline, stats).catch((err) => {
+                plog.error({ err: err instanceof Error ? err.message : String(err) }, "Lỗi khi gửi cho page — sang page tiếp");
+            });
+        },
+        () => Date.now() <= deadline && !shouldStop()
+    );
 
     return stats;
 }

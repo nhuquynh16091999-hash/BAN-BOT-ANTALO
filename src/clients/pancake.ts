@@ -38,11 +38,22 @@ let pageCache: { pages: Map<string, PancakePage>; expiresAt: number } = {
 
 const PAGE_CACHE_MS = 5 * 60 * 1000;
 
+// Job SEND chạy nhiều page song song: gộp các lời gọi cùng lúc vào một lượt tải
+// thay vì mỗi page tự gọi /pages một lần.
+let loading: Promise<Map<string, PancakePage>> | null = null;
+
 async function loadPages(force = false): Promise<Map<string, PancakePage>> {
     if (!force && pageCache.expiresAt > Date.now() && pageCache.pages.size > 0) {
         return pageCache.pages;
     }
+    if (force) return fetchPages();
+    loading ??= fetchPages().finally(() => {
+        loading = null;
+    });
+    return loading;
+}
 
+async function fetchPages(): Promise<Map<string, PancakePage>> {
     const url = `${config.pancake.apiUrl}/pages?access_token=${config.pancake.token}&version=v1`;
     const data = await fetchJson<{
         categorized?: Record<string, Array<{ id?: string; name?: string; settings?: { page_access_token?: string } }>>;
@@ -157,14 +168,24 @@ export interface ScanResult {
 /**
  * Quét toàn bộ hội thoại của một page, lùi ngược thời gian theo từng cửa sổ 28 ngày.
  * Dừng sớm khi 3 cửa sổ liên tiếp không ra bản ghi mới.
+ *
+ * sinceSec: chỉ lấy hội thoại có hoạt động từ mốc này (giây Unix) tới nay —
+ * dùng cho lượt quét nhanh mỗi 15 phút, chỉ tốn vài request thay vì quét lùi 3 năm.
  */
 export async function scanConversations(
     pageId: string,
-    opts: { maxWindows?: number; maxCustomers?: number; concurrency?: number; onProgress?: (found: number, window: number) => void } = {}
+    opts: {
+        maxWindows?: number;
+        maxCustomers?: number;
+        concurrency?: number;
+        sinceSec?: number;
+        onProgress?: (found: number, window: number) => void;
+    } = {}
 ): Promise<ScanResult> {
     const maxWindows = opts.maxWindows ?? config.sync.maxWindows;
     const maxCustomers = opts.maxCustomers ?? config.sync.maxCustomersPerPage;
     const concurrency = opts.concurrency ?? config.sync.pageConcurrency;
+    const floorSec = opts.sinceSec ?? 0;
 
     const token = await getPageToken(pageId);
     if (!token) throw new Error(`Không lấy được page token cho page ${pageId}`);
@@ -175,9 +196,9 @@ export async function scanConversations(
     let windowsScanned = 0;
     let hitCap = false;
 
-    for (let w = 0; w < maxWindows && !hitCap; w++) {
+    for (let w = 0; w < maxWindows && !hitCap && until > floorSec; w++) {
         windowsScanned = w + 1;
-        const since = until - (WINDOW_DAYS * DAY_MS) / 1000;
+        const since = Math.max(until - (WINDOW_DAYS * DAY_MS) / 1000, floorSec);
         let newInWindow = 0;
         let exhausted = false;
 

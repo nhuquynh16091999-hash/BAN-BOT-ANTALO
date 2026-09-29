@@ -53,12 +53,16 @@ module.exports = {
             env: { NODE_ENV: "production" },
         },
         {
-            // Đồng bộ tệp khách: gọi mỗi giờ, job tự chọn page nào đang ở 3h sáng giờ địa phương
+            // Đồng bộ tệp khách: mỗi 15 phút. Page tới 3h sáng giờ địa phương → quét
+            // đầy đủ; page khác → quét nhanh hội thoại mới để khách vừa nhắn vào chuỗi ngay.
+            // kill_timeout: lượt sau tới mà lượt này còn quét đầy đủ dở thì cho 10 phút
+            // làm xong page đang dở (job tự dừng giữa các page, page còn lại để lượt sau).
             name: "banbot-sync",
             script: "dist/jobs/sync.js",
             cwd,
             autorestart: false,
-            cron_restart: "5 * * * *",
+            cron_restart: "5,20,35,50 * * * *",
+            kill_timeout: 600000,
             env: { NODE_ENV: "production" },
         },
         {

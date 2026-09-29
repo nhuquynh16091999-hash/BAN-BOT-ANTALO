@@ -15,7 +15,7 @@ import * as pagesRepo from "../db/repositories/pages.repo.js";
 const USAGE = `
 Cách dùng:
   npm run page:add -- --page 123456789 --market Saudi
-  npm run page:add -- --page 123456789 --market Japan --name "Talpha JP" --shop 987
+  npm run page:add -- --page 123456789 --market Singapore --name "Talpha SG" --shop 987
   npm run page:add -- --page 123456789 --offset 7 --market Thailand    (thị trường lạ → khai múi giờ tay)
 
 Thị trường có sẵn: ${MARKET_KEYS.join(", ")}
@@ -69,8 +69,10 @@ async function main(): Promise<void> {
 
     const page = await pagesRepo.upsert({ pageId, pageName, market, utcOffset, pancakeShopId: values.shop ?? null });
 
+    // Khởi động dần đang tắt (RAMP_UP_DAYS=0) → gửi đủ tệp ngay từ ngày đầu
+    const rampStart = config.rampUp.days > 0 ? config.rampUp.startPercent : 100;
     if (values.activate) {
-        await pagesRepo.setActive(page.id, true, config.rampUp.startPercent);
+        await pagesRepo.setActive(page.id, true, rampStart);
     }
 
     const tz = utcOffset >= 0 ? `UTC+${utcOffset}` : `UTC${utcOffset}`;
@@ -79,7 +81,7 @@ async function main(): Promise<void> {
     console.log(`   page id     : ${page.page_id}`);
     console.log(`   tên         : ${page.page_name}`);
     console.log(`   thị trường  : ${market} (${tz}) → bắn lúc ${config.journey.slotHours.map((h) => h + "h").join(", ")} giờ địa phương`);
-    console.log(`   trạng thái  : ${values.activate ? "ĐANG BẬT (khởi động dần từ " + config.rampUp.startPercent + "%)" : "chưa bật"}`);
+    console.log(`   trạng thái  : ${!values.activate ? "chưa bật" : rampStart < 100 ? `ĐANG BẬT (khởi động dần từ ${rampStart}%)` : "ĐANG BẬT (gửi đủ tệp)"}`);
     if (!values.activate) {
         console.log(`\n   Bước tiếp: npm run script:seed -- --page ${pageId} --file kich-ban.json`);
         console.log(`             npm run job:sync -- --page ${pageId}`);

@@ -87,7 +87,7 @@ try {
     // ═══ 1. MIGRATION ═══════════════════════════════════════════════════════
     section("Migration");
     const applied = await migrate();
-    eq("Áp dụng đúng 4 file migration", applied, 4);
+    eq("Áp dụng đúng 5 file migration", applied, 5);
     const tables = await query<{ n: number }>(
         `SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
     );
@@ -112,7 +112,8 @@ try {
     await pagesRepo.setActive(page.id, true, 25);
     const activated = await pagesRepo.findById(page.id);
     check("Bật page ghi activated_at + ramp 25%", activated?.is_active === true && activated.activated_at !== null && activated.ramp_percent === 25);
-    eq("rampPercentFor ngày đầu = 25", rampPercentFor(activated!, now), 25);
+    eq("Khởi động dần (nếu bật lại 3 ngày/25%): ngày đầu = 25", rampPercentFor(activated!, now, { days: 3, startPercent: 25 }), 25);
+    eq("⭐ Nghiệp vụ 29/09: mặc định gửi đủ tệp ngay ngày đầu (100%)", rampPercentFor(activated!, now), 100);
     eq("isDueForSync: chưa sync bao giờ, đúng giờ 3h → tuỳ giờ hiện tại", typeof isDueForSync(activated!, now), "boolean");
 
     // ═══ 3. KỊCH BẢN ════════════════════════════════════════════════════════
@@ -973,6 +974,101 @@ try {
         await queueRepo.enqueueManual({ pageDbId: mPage.id, customerIds: [], body: "x", media: [] }), 0);
 
     await query(`DELETE FROM pages WHERE page_id = 'SMOKE_MANUAL'`);
+
+    // ═══ NGHIỆP VỤ CHỐT 29/09/2026 (docs/NGHIEP-VU.md) ═══════════════════════
+    section("Nghiệp vụ 29/09 — cấu hình mặc định");
+    const { MARKETS, utcOffsetOf } = await import("../config/markets.js");
+    eq("Có thị trường Singapore, UTC+8", utcOffsetOf("Singapore"), 8);
+    check("Vẫn giữ Vùng Vịnh + Đài Loan", ["Saudi", "UAE", "Kuwait", "Oman", "Qatar", "Bahrain", "Taiwan"].every((k) => k in MARKETS));
+    eq("Từ chối tiếng Mã Lai (Singapore)", matchOptOut("tolong berhenti hantar"), "berhenti");
+    eq("Lỡ giờ dưới 2 tiếng vẫn gửi bù (120 phút)", config.send.lateWindowMin, 120);
+    eq("Page mới gửi đủ tệp ngay (tắt khởi động dần)", config.rampUp.days, 0);
+    eq("Khách để lại SĐT = đã chốt (bật mặc định)", config.convert.onPhone, true);
+    eq("4 tin/ngày lúc 6h, 11h, 17h, 21h", config.journey.slotHours, [6, 11, 17, 21]);
+    eq("Chuỗi 7 ngày", config.journey.days, 7);
+    eq("Khách trả lời bình thường vẫn nhận tiếp (chỉ dừng khi từ chối)", config.journey.stopOnReply, false);
+    check("Gửi nhiều page song song", config.send.pageConcurrency > 1);
+
+    section("Nghiệp vụ 29/09 — khách để lại SĐT thì dừng chuỗi");
+    const phPage = await pagesRepo.upsert({ pageId: "SMOKE_PHONE", pageName: "Page SĐT", market: "Singapore", utcOffset: 8 });
+    const mkp = (psid: string, phone: string | null, daysAgo = 0.5) => ({
+        psid, conversationId: `SMOKE_PHONE_${psid}`, name: `Khách ${psid}`, phone, orderCount: 0, tags: [],
+        lastInteractionAt: new Date(now.getTime() - daysAgo * DAY),
+    });
+    await customersRepo.upsertBatch(phPage.id, [mkp("P1", "6591234567"), mkp("P2", null), mkp("P3", "6598765432")]);
+    const phoneConv = await customersRepo.convertByPhone(phPage.id);
+    eq("⭐ Khách mới có SĐT → dừng (2 khách: P1, P3)", phoneConv.length, 2);
+    eq("…lý do ghi rõ", (await customersRepo.findByPsid(phPage.id, "P1"))?.stop_reason, "Khách để lại SĐT");
+    eq("Khách chưa để SĐT vẫn nhận tin", (await customersRepo.findByPsid(phPage.id, "P2"))?.status, "active");
+    eq("Chạy lại không đổi gì thêm", (await customersRepo.convertByPhone(phPage.id)).length, 0);
+
+    // P2 để lại SĐT ở lượt quét sau
+    await customersRepo.upsertBatch(phPage.id, [mkp("P2", "6511112222", 0.1)]);
+    eq("⭐ Khách để SĐT ở lượt quét sau → dừng", await customersRepo.convertByPhone(phPage.id), [(await customersRepo.findByPsid(phPage.id, "P2"))!.id]);
+
+    // Khách cũ (đã mua ở chuỗi trước, có SĐT) rơi khỏi cửa sổ rồi nhắn lại
+    await customersRepo.upsertBatch(phPage.id, [mkp("P4", "6533334444", 1)]);
+    await query(`UPDATE customers SET status = 'expired', last_interaction_at = now() - interval '12 days' WHERE page_id = $1 AND psid = 'P4'`, [phPage.id]);
+    const p4Back = await customersRepo.upsertBatch(phPage.id, [mkp("P4", "6533334444", 0.05)]);
+    eq("P4 quay lại → vào chuỗi mới", p4Back.rejoined, 1);
+    eq("P4: ghi nhớ SĐT cũ lúc vào chuỗi", (await customersRepo.findByPsid(phPage.id, "P4"))?.phone_at_entry, "6533334444");
+    eq("⭐ Khách quay lại mang SĐT CŨ vẫn được nuôi dưỡng", (await customersRepo.convertByPhone(phPage.id)).length, 0);
+    await customersRepo.upsertBatch(phPage.id, [mkp("P4", "6555556666", 0.01)]);
+    eq("⭐ …nhưng để lại SĐT MỚI trong chuỗi này → dừng", (await customersRepo.convertByPhone(phPage.id)).length, 1);
+
+    section("Nghiệp vụ 29/09 — khách mới nhắn được gửi ngay trong ngày");
+    const neverSynced = (await pagesRepo.findById(phPage.id))!;
+    eq("Page chưa đồng bộ lần nào → quét đầy đủ ngay, không chờ 3h sáng", isDueForSync(neverSynced, now), true);
+
+    const { quickSinceSec } = await import("../jobs/sync.js");
+    const fifteenAgo = new Date(now.getTime() - 15 * 60_000);
+    await pagesRepo.markSynced(phPage.id, new Date(now.getTime() - 5 * 3600_000));
+    await pagesRepo.markQuickSynced(phPage.id, fifteenAgo);
+    const synced = (await pagesRepo.findById(phPage.id))!;
+    eq("Quét nhanh lấy từ lần quét trước lùi thêm 30 phút chồng lấn",
+        quickSinceSec(synced, now), Math.floor((fifteenAgo.getTime() - 30 * 60_000) / 1000));
+    eq("Quét nhanh không bao giờ lùi quá 27 ngày",
+        quickSinceSec({ ...synced, last_quick_synced_at: new Date(now.getTime() - 90 * DAY) }, now),
+        Math.floor((now.getTime() - 27 * DAY) / 1000));
+    await pagesRepo.markSynced(phPage.id, now);
+    check("Quét đầy đủ dời luôn mốc quét nhanh", (await pagesRepo.findById(phPage.id))?.last_quick_synced_at?.getTime() === now.getTime());
+
+    // Page ở giờ địa phương ~12h: khách vừa vào chuỗi nhận tin 11h ngay (trễ < 2 tiếng),
+    // rồi 17h, 21h; tin 6h đã quá xa thì bỏ
+    let noonOffset = 12 - now.getUTCHours();
+    if (noonOffset > 14) noonOffset -= 24;
+    if (noonOffset < -12) noonOffset += 24;
+    const noonPage = await pagesRepo.upsert({ pageId: "SMOKE_NOON", pageName: "Page trưa", market: "Test", utcOffset: noonOffset });
+    await pagesRepo.setActive(noonPage.id, true, 100);
+    await scriptsRepo.replaceActiveScript(noonPage.id, "Trưa", messages, { journeyDays: 7, slotsPerDay: 4 });
+    await customersRepo.upsertBatch(noonPage.id, [{
+        psid: "N1", conversationId: "SMOKE_NOON_N1", name: "Khách trưa", phone: null, orderCount: 0, tags: [],
+        lastInteractionAt: new Date(now.getTime() - 10 * 60_000), // vừa nhắn 10 phút trước
+    }]);
+    const noonPlan = await planPage((await pagesRepo.findById(noonPage.id))!, log, { dryRun: true });
+    eq("⭐ Khách vừa nhắn (dưới 24h) vẫn đủ điều kiện", noonPlan.eligible, 1);
+    eq("⭐ Vào chuỗi lúc trưa → nhận ngay tin 11h + 17h + 21h", noonPlan.enqueued, 3);
+    eq("…tin 6h trễ quá 2 tiếng thì bỏ", noonPlan.slotsSkippedPast, 1);
+
+    section("Nghiệp vụ 29/09 — nhiều page gửi song song");
+    const { forEachConcurrent } = await import("../lib/concurrency.js");
+    let running = 0;
+    let peak = 0;
+    const done: number[] = [];
+    await forEachConcurrent([...Array(12).keys()], 4, async (i) => {
+        running++;
+        peak = Math.max(peak, running);
+        await time.sleep(i % 3 === 0 ? 30 : 5); // page nhiều khách chạy lâu hơn
+        done.push(i);
+        running--;
+    });
+    eq("Xử lý đủ cả 12 page", [...done].sort((a, b) => a - b), [...Array(12).keys()]);
+    eq("⭐ Tối đa đúng 4 page cùng lúc", peak, 4);
+    let started = 0;
+    await forEachConcurrent([...Array(10).keys()], 3, async () => { started++; await time.sleep(5); }, () => started < 5);
+    check("Hết giờ / pm2 báo dừng → không nhận page mới", started >= 5 && started < 10, `đã bắt đầu ${started}`);
+
+    await query(`DELETE FROM pages WHERE page_id IN ('SMOKE_PHONE', 'SMOKE_NOON')`);
 
     await closePool();
 } catch (err) {

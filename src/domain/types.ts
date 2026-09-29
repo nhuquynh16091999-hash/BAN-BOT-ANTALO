@@ -34,6 +34,8 @@ export interface Page {
     ramp_percent: number;
     last_synced_at: Date | null;
     last_planned_at: Date | null;
+    /** Lần quét nhanh gần nhất — lượt sau chỉ lấy hội thoại mới từ mốc này. */
+    last_quick_synced_at: Date | null;
 }
 
 export interface Script {
@@ -74,6 +76,8 @@ export interface Customer {
     /** Số đơn POS lúc khách vào chuỗi. NULL = chưa đối chiếu POS lần nào. */
     order_count_baseline: number | null;
     pos_checked_at: Date | null;
+    /** SĐT lúc khách vào chuỗi. Chỉ SĐT khác giá trị này mới tính là chốt. */
+    phone_at_entry: string | null;
 }
 
 /** Khách vừa quét được từ Pancake, chưa vào DB. */

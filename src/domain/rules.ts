@@ -46,8 +46,10 @@ const OPT_OUT_SUBSTRINGS: readonly string[] = [
     "توقف", "لا ترسل", "إلغاء", "لا اريد", "لا أريد",
     // Nhật
     "やめて", "送らないで", "配信停止", "解除",
-    // Trung (Đài Loan)
+    // Trung (Đài Loan, Singapore)
     "不要再傳", "不要再发", "取消訂閱", "取消订阅", "停止",
+    // Mã Lai (Singapore)
+    "berhenti", "jangan hantar", "jangan mesej",
 ];
 
 /** Trả về từ khoá khớp được, hoặc null nếu tin không phải lời từ chối. */

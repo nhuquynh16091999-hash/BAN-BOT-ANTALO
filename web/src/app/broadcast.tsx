@@ -801,6 +801,8 @@ function ScriptScreen({
     onRemoveMedia,
     onSave,
     onToggleActive,
+    copySources,
+    onCopyFrom,
 }: {
     page: PageInfo;
     schedule: Schedule | null;
@@ -817,6 +819,8 @@ function ScriptScreen({
     onRemoveMedia: (i: number, m: number) => void;
     onSave: () => void;
     onToggleActive: () => void;
+    copySources: Array<{ pageId: string; pageName: string; filled: number }>;
+    onCopyFrom: (pageId: string) => void;
 }) {
     const filled = msgs.filter((m, i) => m.trim() || medias[i]!.length).length;
     const sent = schedule?.segments.reduce((a, s) => a + s.successCount, 0) ?? 0;
@@ -851,9 +855,28 @@ function ScriptScreen({
                             Mỗi khách đi hết 7 ngày, mỗi ngày nhận 4 tin. Tin lặp lại sau đúng 3 ngày.
                         </p>
                     </div>
-                    <button className="btn btn-primary" onClick={onSave} disabled={saving || filled === 0}>
-                        {saving ? "Đang lưu…" : "Lưu kịch bản"}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {copySources.length > 0 && (
+                            <select
+                                className="field !w-auto !py-1.5 !text-[13px]"
+                                value=""
+                                onChange={(e) => {
+                                    if (e.target.value) onCopyFrom(e.target.value);
+                                }}
+                                title="Đổ kịch bản của page khác vào đây để sửa — chưa lưu cho tới khi bấm Lưu"
+                            >
+                                <option value="">Chép từ page khác…</option>
+                                {copySources.map((s) => (
+                                    <option key={s.pageId} value={s.pageId}>
+                                        {s.pageName} ({s.filled} tin)
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        <button className="btn btn-primary" onClick={onSave} disabled={saving || filled === 0}>
+                            {saving ? "Đang lưu…" : "Lưu kịch bản"}
+                        </button>
+                    </div>
                 </div>
 
                 <div className="space-y-5 p-4">
@@ -903,7 +926,7 @@ function ScriptScreen({
                             ? `Engine đang gửi tự động cho ${num(page.activeCustomers)} khách theo 4 khung giờ mỗi ngày.`
                             : filled === 0
                               ? "Cần nhập nội dung và lưu kịch bản trước khi bật."
-                              : `Bật lên là engine bắt đầu gửi thật cho ${num(page.activeCustomers)} khách. Ba ngày đầu chỉ gửi 25% tệp.`}
+                              : `Bật lên là engine bắt đầu gửi thật cho ${num(page.activeCustomers)} khách, đủ tệp ngay từ khung giờ gần nhất.`}
                     </p>
                 </div>
                 <button
@@ -1359,6 +1382,54 @@ export default function App() {
         }
     }, [pageId, msgs, labels, medias, say, loadPages]);
 
+    // ─── Chép kịch bản từ page khác ───────────────────────────────────────
+    // Chỉ đổ vào các ô soạn, CHƯA lưu: người dùng sửa lại tên sản phẩm/giá cho
+    // đúng page này rồi mới bấm "Lưu kịch bản". Kịch bản page nguồn giữ nguyên.
+    const copySources = useMemo(
+        () =>
+            schedules
+                .filter((s) => s.pageId !== pageId && s.hasScript)
+                .map((s) => ({
+                    pageId: s.pageId,
+                    pageName: s.pageName,
+                    filled: s.segments.filter((g) => g.message.trim() || g.media.length).length,
+                }))
+                .filter((s) => s.filled > 0)
+                .sort((a, b) => a.pageName.localeCompare(b.pageName)),
+        [schedules, pageId]
+    );
+
+    const copyScriptFrom = useCallback(
+        (sourcePageId: string) => {
+            const src = schedules.find((s) => s.pageId === sourcePageId);
+            if (!src) return;
+            const hasContent = msgs.some((m, i) => m.trim() || (medias[i] ?? []).length);
+            if (
+                hasContent &&
+                !confirm(`Chép kịch bản của "${src.pageName}" sẽ thay toàn bộ nội dung đang soạn ở đây.\n\nTiếp tục?`)
+            )
+                return;
+
+            const nm: string[] = Array(SLOT_COUNT).fill("");
+            const nl: string[] = Array(SLOT_COUNT).fill("");
+            const nd: string[][] = Array.from({ length: SLOT_COUNT }, () => []);
+            let copied = 0;
+            for (const seg of src.segments) {
+                const i = seg.segIdx;
+                if (i < 0 || i >= SLOT_COUNT) continue;
+                nm[i] = seg.message ?? "";
+                nl[i] = seg.label ?? "";
+                nd[i] = [...(seg.media ?? [])];
+                if (nm[i].trim() || nd[i].length) copied++;
+            }
+            setMsgs(nm);
+            setLabels(nl);
+            setMedias(nd);
+            say(`Đã chép ${copied} tin từ "${src.pageName}" — sửa cho đúng page này rồi bấm "Lưu kịch bản"`, "ok", 8000);
+        },
+        [schedules, msgs, medias, say]
+    );
+
     // ─── Bật / tắt page ───────────────────────────────────────────────────
     const toggleActive = useCallback(async () => {
         if (!page) return;
@@ -1368,7 +1439,7 @@ export default function App() {
             !confirm(
                 `Bật chiến dịch cho "${page.name}"?\n\nEngine sẽ bắt đầu gửi tin thật cho ${num(
                     page.activeCustomers
-                )} khách hàng.\nBa ngày đầu chỉ gửi 25% tệp.`
+                )} khách hàng, gửi đủ tệp ngay từ khung giờ gần nhất.`
             )
         )
             return;
@@ -1592,6 +1663,8 @@ export default function App() {
                         }
                         onSave={saveScript}
                         onToggleActive={toggleActive}
+                        copySources={copySources}
+                        onCopyFrom={copyScriptFrom}
                     />
                 )}
 

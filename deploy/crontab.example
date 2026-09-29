@@ -8,8 +8,9 @@ APP=/opt/banbot
 
 # Gửi — mỗi 5 phút
 */5 * * * *        cd $APP && node dist/jobs/send.js   >> logs/send.log   2>&1
-# Đồng bộ tệp khách — mỗi giờ (job tự chọn page tới giờ 3h sáng địa phương)
-5 * * * *          cd $APP && node dist/jobs/sync.js   >> logs/sync.log   2>&1
+# Đồng bộ tệp khách — mỗi 15 phút (3h sáng địa phương quét đầy đủ, còn lại quét nhanh khách mới)
+# flock: lượt quét đầy đủ dài hơn 15 phút thì lượt sau tự bỏ, không chạy chồng
+5,20,35,50 * * * * cd $APP && flock -n /tmp/banbot-sync.lock node dist/jobs/sync.js >> logs/sync.log 2>&1
 # Đối chiếu đơn POS — mỗi 15 phút (dừng chuỗi cho khách đã chốt)
 8,23,38,53 * * * * cd $APP && node dist/jobs/pos.js    >> logs/pos.log    2>&1
 # Giám sát sức khoẻ — mỗi 15 phút

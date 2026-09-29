@@ -11,7 +11,8 @@ import type { Customer, SyncedCustomer, CustomerEventType } from "../../domain/t
 const COLS = `
     id, page_id, psid, conversation_id, name, phone, order_count, tags,
     first_seen_at, last_interaction_at, journey_day, journey_count,
-    status, stop_reason, stopped_at, order_count_baseline, pos_checked_at
+    status, stop_reason, stopped_at, order_count_baseline, pos_checked_at,
+    phone_at_entry
 `;
 
 export interface UpsertStats {
@@ -73,7 +74,12 @@ export async function upsertBatch(pageDbId: number, batch: SyncedCustomer[]): Pr
                  THEN NULL ELSE customers.stop_reason END,
              stopped_at = CASE
                  WHEN customers.status = 'expired' AND EXCLUDED.last_interaction_at > customers.last_interaction_at
-                 THEN NULL ELSE customers.stopped_at END
+                 THEN NULL ELSE customers.stopped_at END,
+             -- Vào chuỗi mới: SĐT đang có là của chuỗi trước (customers.phone ở
+             -- đây là giá trị CŨ, trước lượt cập nhật này) — chỉ SĐT khác mới tính là chốt
+             phone_at_entry = CASE
+                 WHEN customers.status = 'expired' AND EXCLUDED.last_interaction_at > customers.last_interaction_at
+                 THEN customers.phone ELSE customers.phone_at_entry END
          RETURNING id,
                    (xmax = 0)                                   AS inserted,
                    (xmax <> 0 AND first_seen_at = now())        AS rejoined`,
@@ -226,12 +232,17 @@ export async function recordEvent(
 }
 
 /** Ghi sự kiện cho nhiều khách một lượt — dùng sau upsert cho khách mới/quay lại. */
-export async function recordEvents(pageDbId: number, ids: number[], type: CustomerEventType): Promise<void> {
+export async function recordEvents(
+    pageDbId: number,
+    ids: number[],
+    type: CustomerEventType,
+    payload: Record<string, unknown> = {}
+): Promise<void> {
     if (ids.length === 0) return;
     await query(
-        `INSERT INTO customer_events (customer_id, page_id, type, journey_day)
-         SELECT c.id, $1, $2, c.journey_day FROM customers c WHERE c.id = ANY($3::bigint[])`,
-        [pageDbId, type, ids]
+        `INSERT INTO customer_events (customer_id, page_id, type, journey_day, payload)
+         SELECT c.id, $1, $2, c.journey_day, $4 FROM customers c WHERE c.id = ANY($3::bigint[])`,
+        [pageDbId, type, ids, JSON.stringify(payload)]
     );
 }
 
@@ -281,6 +292,25 @@ export async function convertByPurchaseTags(pageDbId: number, patterns: string[]
             AND EXISTS (SELECT 1 FROM unnest(c.tags) AS t WHERE lower(t) LIKE ANY($2::text[]))
           RETURNING c.id`,
         [pageDbId, patterns]
+    );
+    return rows.map((r) => r.id);
+}
+
+/**
+ * Khách để lại SĐT trong chuỗi này → converted. Trả về id để huỷ hàng đợi và ghi sự kiện.
+ *
+ * "Trong chuỗi này" = SĐT hiện tại khác SĐT lúc vào chuỗi (phone_at_entry).
+ * Khách quay lại mang SĐT cũ từ lần mua trước vẫn được nuôi dưỡng tiếp.
+ */
+export async function convertByPhone(pageDbId: number): Promise<number[]> {
+    const rows = await query<{ id: number }>(
+        `UPDATE customers
+            SET status = 'converted', stop_reason = 'Khách để lại SĐT', stopped_at = now()
+          WHERE page_id = $1 AND status = 'active'
+            AND btrim(COALESCE(phone, '')) <> ''
+            AND phone IS DISTINCT FROM phone_at_entry
+          RETURNING id`,
+        [pageDbId]
     );
     return rows.map((r) => r.id);
 }
