@@ -11,13 +11,13 @@ code sai. Đổi nghiệp vụ thì sửa file này trước, rồi mới sửa 
 | 1 | Nền tảng | Xây tiếp trên v2 | Giữ kiến trúc v2: Postgres, hàng đợi chống trùng, job riêng biệt | — |
 | 2 | Nơi chạy | VPS thuê, 24/7 | pm2 trên VPS, xem `deploy/SERVER.md` | `ecosystem.config.cjs` |
 | 3 | Số page | Trên 20 | Job SEND gửi **song song nhiều page** thay vì lần lượt — page cuối danh sách không bị trễ mất khung giờ | `SEND_PAGE_CONCURRENCY=10` |
-| 4 | Thị trường | Vùng Vịnh · Đài Loan · Singapore → **30/09: chạy cả 37 page** | Thêm Singapore, Philippines, Hồng Kông, Việt Nam (giờ cố định) và **Ý (tự đổi giờ mùa hè theo Europe/Rome)**; từ từ chối tiếng Mã Lai. 11 page chưa rõ nước chủ dự án tự gán sau | `src/config/markets.ts` |
+| 4 | Thị trường | Vùng Vịnh · Đài Loan · Singapore → **30/09: chạy cả 37 page, KHÔNG chia nước** | Mọi page gửi 6h · 11h · 17h · 21h **theo giờ Việt Nam** (thị trường `Chung`, mặc định khi thêm page). Bảng thị trường riêng (Saudi, Singapore, Ý có giờ mùa hè…) vẫn giữ trong code nếu sau này cần tách một page | `src/config/markets.ts` |
 | 5 | Gửi cho ai | Khách chưa chốt đơn **lần này** | Khách mua từ lâu mà nay nhắn lại vẫn được chăm; chỉ dừng khi chốt đơn mới | `POS_CONVERT_MODE=increase` |
 | 6 | Biết khách đã chốt | Đơn POS · Tag · **Khách để lại SĐT** | Thêm luật SĐT: SĐT để lại **trong chuỗi này** → dừng chuỗi, huỷ lượt còn chờ | `CONVERT_ON_PHONE=true` |
 | 7 | Khách mới nhắn < 24h | **Gửi luôn** | Job SYNC **quét nhanh mỗi 15 phút** → khách vừa nhắn vào chuỗi ngay trong ngày, nhận tin ở khung giờ gần nhất | `SYNC_QUICK_ENABLED=true` |
 | 8 | Khách trả lời bot | Chỉ dừng khi từ chối | Trả lời bình thường vẫn nhận tiếp; nhắn "stop", "توقف", "不要再傳", "berhenti"… thì dừng vĩnh viễn | `STOP_ON_REPLY=false` |
 | 9 | Kiểu gửi | Mỗi khách đi chuỗi riêng | Khách vào hôm nay nhận tin số 1, hôm sau tin số 5… | `src/domain/journey.ts` |
-| 10 | Số tin/ngày | 4 tin: 6h · 11h · 17h · 21h | Giờ địa phương của từng page | `SEND_SLOT_HOURS=6,11,17,21` |
+| 10 | Số tin/ngày | 4 tin: 6h · 11h · 17h · 21h | Theo giờ Việt Nam cho mọi page (câu 4) | `SEND_SLOT_HOURS=6,11,17,21` |
 | 11 | Độ dài chuỗi | 7 ngày | Tối đa Facebook cho phép; khách nhắn lại thì chuỗi tính lại từ đầu | `JOURNEY_DAYS=7` |
 | 12 | Kịch bản 20+ page | Mỗi page riêng, **sao chép được** | Màn **Kịch bản tự động** có ô **"Chép từ page khác…"**: đổ 12 tin của page khác vào để sửa, bấm Lưu mới ghi | giao diện |
 | 13 | Bị Facebook chặn #2022 | Tự giảm tốc, nghỉ, thử lại | Lỗi tăng → hãm tốc; bị chặn → nghỉ 30'; chặn 3 lần/24h → nghỉ 6h | `HEALTH_*` |

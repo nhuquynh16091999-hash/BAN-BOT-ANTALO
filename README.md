@@ -96,7 +96,7 @@ Phần **không** được phủ: gọi API Pancake/Facebook thật (cần token
 npm run page:list
 
 # 2. Thêm page (chưa bật)
-npm run page:add -- --page 123456789 --market Saudi
+npm run page:add -- --page 123456789
 
 # 3. Soạn 12 nội dung — chép kich-ban/mau.json ra file riêng, thay hết [THAY NỘI DUNG]
 npm run script:seed -- --page 123456789 --file kich-ban/saudi.json
@@ -108,12 +108,12 @@ npm run job:sync -- --page 123456789
 npm run job:plan -- --page 123456789 --force --dry-run
 
 # 6. Bật. Page mới gửi đủ tệp ngay (muốn khởi động dần: RAMP_UP_DAYS=3 trong .env)
-npm run page:add -- --page 123456789 --market Saudi --activate
+npm run page:add -- --page 123456789 --activate
 ```
 
-Thị trường có sẵn: Saudi · UAE · Kuwait · Oman · Qatar · Bahrain · Taiwan · Singapore · Philippines ·
-HongKong · Japan · Vietnam · Italy (thị trường khác: thêm `--offset <giờ UTC>`). Italy có giờ mùa hè — job
-sync tự chỉnh giờ theo múi `Europe/Rome`, không phải sửa tay.
+Mặc định **mọi page gửi theo giờ Việt Nam** (thị trường `Chung`) — không chia page theo nước. Chỉ khi thật
+sự cần tách giờ riêng cho một page mới thêm `--market` (Saudi · UAE · Kuwait · Oman · Qatar · Bahrain · Taiwan ·
+Singapore · Philippines · HongKong · Japan · Vietnam · Italy — Italy tự đổi giờ mùa hè) hoặc `--offset <giờ UTC>`.
 
 Đã có một page chạy tốt? Trên giao diện chính, màn **Kịch bản tự động** có ô
 **"Chép từ page khác…"** — đổ 12 tin của page đó vào để sửa lại cho page mới, bấm Lưu mới ghi.
@@ -209,7 +209,7 @@ npm run check:tokens                                     # kiểm khoá từng s
 npm run job:pos -- --dry-run                             # xem POS có bao nhiêu khách
 ```
 
-Rồi gắn shop vào page: `npm run page:add -- --page <id> --market Saudi --shop <shop_id>`.
+Rồi gắn shop vào page: `npm run page:add -- --page <id> --shop <shop_id>`.
 Page không gắn shop thì job POS bỏ qua. Nhiều page dùng chung một shop chỉ gọi POS **một lần** mỗi lượt.
 
 ### Vì sao có "mốc chuẩn"

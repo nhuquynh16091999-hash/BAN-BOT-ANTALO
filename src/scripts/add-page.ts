@@ -1,13 +1,15 @@
 import { parseArgs } from "node:util";
 import { closePool } from "../db/pool.js";
 import { config } from "../config/index.js";
-import { MARKETS, MARKET_KEYS, isMarketKey, type Market } from "../config/markets.js";
+import { MARKETS, MARKET_KEYS, DEFAULT_MARKET, isMarketKey, type Market } from "../config/markets.js";
 import { currentUtcOffset } from "../lib/time.js";
 import * as pancake from "../clients/pancake.js";
 import * as pagesRepo from "../db/repositories/pages.repo.js";
 
 /**
- * npm run page:add -- --page <id> --market <Saudi|UAE|…> [--name "…"] [--shop <id>] [--offset <n>] [--activate]
+ * npm run page:add -- --page <id> [--market <…>] [--name "…"] [--shop <id>] [--offset <n>] [--activate]
+ *
+ * Không khai --market → theo đồng hồ chung giờ Việt Nam (nghiệp vụ 30/09: không chia nước).
  *
  * Đưa một page vào hệ thống. Chưa bật gửi ngay (trừ khi --activate) — nên
  * nạp kịch bản (npm run script:seed) và chạy sync một lần trước khi bật.
@@ -15,7 +17,8 @@ import * as pagesRepo from "../db/repositories/pages.repo.js";
 
 const USAGE = `
 Cách dùng:
-  npm run page:add -- --page 123456789 --market Saudi
+  npm run page:add -- --page 123456789                   (mặc định: gửi theo giờ Việt Nam)
+  npm run page:add -- --page 123456789 --market Saudi    (chỉ khi thật sự cần tách giờ riêng)
   npm run page:add -- --page 123456789 --market Singapore --name "Talpha SG" --shop 987
   npm run page:add -- --page 123456789 --offset 7 --market Thailand    (thị trường lạ → khai múi giờ tay)
 
@@ -35,14 +38,14 @@ async function main(): Promise<void> {
         },
     });
 
-    if (values.help || !values.page || !values.market) {
+    if (values.help || !values.page) {
         console.log(USAGE);
         process.exitCode = values.help ? 0 : 1;
         return;
     }
 
     const pageId = values.page.trim();
-    const market = values.market.trim();
+    const market = values.market?.trim() || DEFAULT_MARKET;
 
     let utcOffset: number;
     let timezone: string | null = null;

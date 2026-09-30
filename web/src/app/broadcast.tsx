@@ -329,7 +329,7 @@ function OverviewScreen({
                 ) : pages.length === 0 ? (
                     <Empty
                         title="Chưa có page nào"
-                        hint="Thêm page bằng dòng lệnh trên máy chủ: npm run page:add -- --page <id> --market Saudi"
+                        hint="Thêm page bằng dòng lệnh trên máy chủ: npm run page:add -- --page <id>"
                     />
                 ) : (
                     <div className="overflow-x-auto">
@@ -337,7 +337,6 @@ function OverviewScreen({
                             <thead>
                                 <tr>
                                     <th>Page</th>
-                                    <th>Thị trường</th>
                                     <th>Trạng thái</th>
                                     <th className="text-right">Gửi được</th>
                                     <th className="text-right">Tổng tệp</th>
@@ -355,7 +354,6 @@ function OverviewScreen({
                                                 {p.pageId}
                                             </div>
                                         </td>
-                                        <td style={{ color: "var(--ink-2)" }}>{p.shopName}</td>
                                         <td>
                                             <div className="flex flex-wrap items-center gap-1.5">
                                                 <PageStateChip p={p} />
@@ -556,7 +554,7 @@ function MonitorScreen({
                                     <td>
                                         <div className="font-semibold">{p.name}</div>
                                         <div className="mono" style={{ color: "var(--ink-3)" }}>
-                                            {p.market}
+                                            {p.pageId}
                                         </div>
                                     </td>
                                     <td>
@@ -2246,7 +2244,6 @@ export default function App() {
                     >
                         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-5 gap-y-1 text-[12.5px]">
                             <span className="font-semibold">{page.name}</span>
-                            <span style={{ color: "var(--ink-3)" }}>{page.shopName}</span>
                             <span className="num" style={{ color: "var(--ink-2)" }}>
                                 <b>{num(page.activeCustomers)}</b> khách gửi được
                                 <span style={{ color: "var(--ink-3)" }}> / {num(page.totalCustomers)} trong tệp</span>

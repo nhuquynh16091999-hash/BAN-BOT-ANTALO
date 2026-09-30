@@ -19,6 +19,10 @@ export interface Market {
 }
 
 export const MARKETS = {
+    // Nghiệp vụ 30/09/2026: KHÔNG chia page theo nước nữa — mọi page gửi 6h · 11h ·
+    // 17h · 21h theo giờ Việt Nam. Các thị trường bên dưới giữ lại cho trường hợp
+    // sau này cần tách riêng một page.
+    Chung:   { key: "Chung",   label: "Giờ Việt Nam", city: "Việt Nam",  utcOffset: 7, flag: "🕖" },
     Saudi:   { key: "Saudi",   label: "Ả Rập Xê Út", city: "Riyadh",     utcOffset: 3, flag: "🇸🇦" },
     UAE:     { key: "UAE",     label: "UAE",          city: "Dubai",      utcOffset: 4, flag: "🇦🇪" },
     Kuwait:  { key: "Kuwait",  label: "Kuwait",       city: "Kuwait City",utcOffset: 3, flag: "🇰🇼" },
@@ -36,6 +40,9 @@ export const MARKETS = {
 } as const satisfies Record<string, Market>;
 
 export type MarketKey = keyof typeof MARKETS;
+
+/** Thị trường mặc định khi thêm page mà không nói gì: đồng hồ chung giờ Việt Nam. */
+export const DEFAULT_MARKET: MarketKey = "Chung";
 
 export const MARKET_KEYS = Object.keys(MARKETS) as MarketKey[];
 

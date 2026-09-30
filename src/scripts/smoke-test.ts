@@ -867,6 +867,8 @@ try {
     eq("Có thị trường Singapore, UTC+8", utcOffsetOf("Singapore"), 8);
     check("Vẫn giữ Vùng Vịnh + Đài Loan", ["Saudi", "UAE", "Kuwait", "Oman", "Qatar", "Bahrain", "Taiwan"].every((k) => k in MARKETS));
     eq("Từ chối tiếng Mã Lai (Singapore)", matchOptOut("tolong berhenti hantar"), "berhenti");
+    const { DEFAULT_MARKET } = await import("../config/markets.js");
+    eq("⭐ Nghiệp vụ 30/09: không chia nước — mặc định mọi page theo giờ Việt Nam", [DEFAULT_MARKET, utcOffsetOf(DEFAULT_MARKET)], ["Chung", 7]);
     eq("Thêm thị trường Philippines · Hồng Kông · Việt Nam · Ý",
         [utcOffsetOf("Philippines"), utcOffsetOf("HongKong"), utcOffsetOf("Vietnam"), utcOffsetOf("Italy")], [8, 8, 7, 1]);
     eq("⭐ Giờ mùa hè: Ý tháng 7 là UTC+2", time.currentUtcOffset("Europe/Rome", new Date("2026-07-15T12:00:00Z")), 2);

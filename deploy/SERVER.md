@@ -88,9 +88,9 @@ ssh banbot-antalo
 cd /opt/banbot
 
 node dist/scripts/list-pages.js                      # page mà token Pancake nhìn thấy
-node dist/scripts/add-page.js --page <id> --market Saudi
+node dist/scripts/add-page.js --page <id>
 node dist/jobs/sync.js --page <id> --dry-run         # thử, không ghi
-node dist/scripts/add-page.js --page <id> --market Saudi --activate   # BẮT ĐẦU GỬI
+node dist/scripts/add-page.js --page <id> --activate   # BẮT ĐẦU GỬI
 
 pm2 logs banbot-send --lines 50
 psql -d banbot
