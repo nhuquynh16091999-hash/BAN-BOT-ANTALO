@@ -58,17 +58,15 @@ khách mua 6 tháng trước (đã có SĐT) mà nay nhắn lại là khách ấ
 | Khách cũ quay lại, vẫn SĐT cũ | **Vẫn chăm** |
 | Khách cũ quay lại, để lại SĐT mới | Dừng |
 
-## Việc cần làm khi triển khai bản này lên VPS
+## Triển khai
 
-1. `npm run migrate` — chạy migration `005` (thêm 2 cột, không xoá gì).
-   Khách đang ở chuỗi đầu tiên mà đã có SĐT sẽ bị dừng ở lượt SYNC kế tiếp — đúng luật mới.
-2. **Kiểm tra `/opt/banbot/.env` trên VPS.** Nếu file đó đã ghi sẵn giá trị cũ thì
-   giá trị cũ vẫn thắng giá trị mặc định mới. Sửa hoặc xoá các dòng:
-   `RAMP_UP_DAYS` (→ 0), `SEND_LATE_WINDOW_MIN` (→ 120), `DATABASE_POOL_MAX` (→ 20).
-3. Deploy bằng **`RELOAD_CRON=1 bash deploy/deploy.sh`** — lịch `banbot-sync` đổi
-   từ mỗi giờ sang mỗi 15 phút, pm2 không tự nạp lịch mới nếu chỉ restart.
-4. Kiểm tra: `pm2 describe banbot-sync | grep cron` phải ra `5,20,35,50 * * * *`.
-5. Gắn page Singapore: `npm run page:add -- --page <id> --market Singapore`.
+Bản clone chạy trên server riêng (host `banbot-antalo`), cài mới từ đầu ngày
+30/09/2026 — cách cài, cách deploy và các việc người quản trị tự làm (mở cổng,
+đặt mật khẩu, điền token) ở **[deploy/SERVER.md](../deploy/SERVER.md)**.
+
+Lưu ý khi sửa `.env` trên server: giá trị ghi trong `.env` thắng giá trị mặc định
+trong code. Đừng chép `.env` từ nơi khác sang mà không xem lại các dòng
+`RAMP_UP_DAYS`, `SEND_LATE_WINDOW_MIN` — chúng quyết định nghiệp vụ ở câu 14 và 18.
 
 ## Còn để ngỏ
 

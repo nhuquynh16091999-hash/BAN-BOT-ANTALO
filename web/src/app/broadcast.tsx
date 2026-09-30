@@ -215,6 +215,17 @@ function num(n: number): string {
     return n.toLocaleString("vi-VN");
 }
 
+/**
+ * Link ảnh để XEM TRƯỚC trên giao diện. Ảnh lưu kèm địa chỉ công khai PUBLIC_URL
+ * (cổng HTTP riêng cho Facebook/Pancake tải) — trang đang chạy HTTPS thì trình
+ * duyệt chặn ảnh HTTP. Xem trước qua đường tương đối của chính trang này thì
+ * vừa cùng giao thức vừa dùng luôn phiên đăng nhập.
+ */
+function previewSrc(url: string): string {
+    const i = url.indexOf("/api/media/");
+    return i >= 0 ? url.slice(i) : url;
+}
+
 // ─── Thành phần dùng chung ────────────────────────────────────────────────────
 
 function Chip({ kind, children }: { kind: "ok" | "warn" | "bad" | "brand" | "muted"; children: React.ReactNode }) {
@@ -757,7 +768,7 @@ function SlotCard({
                     <span key={url + i} className="relative">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                            src={url}
+                            src={previewSrc(url)}
                             alt=""
                             className="h-11 w-11 rounded-md border object-cover"
                             style={{ borderColor: "var(--line)" }}
@@ -1118,7 +1129,7 @@ function ManualScreen({
                         <span key={url + i} className="relative">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                                src={url}
+                                src={previewSrc(url)}
                                 alt=""
                                 className="h-12 w-12 rounded-md border object-cover"
                                 style={{ borderColor: "var(--line)" }}
