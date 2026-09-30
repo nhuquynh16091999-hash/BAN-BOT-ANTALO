@@ -22,7 +22,7 @@ code sai. Đổi nghiệp vụ thì sửa file này trước, rồi mới sửa 
 | 12 | Kịch bản 20+ page | Mỗi page riêng, **sao chép được** | Màn **Kịch bản tự động** có ô **"Chép từ page khác…"**: đổ 12 tin của page khác vào để sửa, bấm Lưu mới ghi | giao diện |
 | 13 | Bị Facebook chặn #2022 | Tự giảm tốc, nghỉ, thử lại | Lỗi tăng → hãm tốc; bị chặn → nghỉ 30'; chặn 3 lần/24h → nghỉ 6h | `HEALTH_*` |
 | 14 | Lỡ giờ | Gửi bù nếu trễ **dưới 2 tiếng** | Trễ quá 2 tiếng thì bỏ lượt đó | `SEND_LATE_WINDOW_MIN=120` |
-| 15 | Người dùng | Vài người, chung mật khẩu | Một trang web, một tài khoản `admin` chung (nginx) | `deploy/mo-cong.sh` |
+| 15 | Người dùng | Vài người, chung mật khẩu → **30/09: bỏ mật khẩu** | Một trang web, **không đăng nhập** (chủ dự án không muốn đặt mật khẩu; đã được báo rủi ro: ai biết link đều xem được khách và bấm gửi tin). Chặn công cụ tìm kiếm lưu trang | nginx |
 | 16 | Báo cáo | Cả 4 loại | Gửi được/lỗi + sức khoẻ page + nhật ký chạy nền (màn **Theo dõi**) · tin nào ra đơn, chốt ngày mấy, chốt qua đường nào (màn **Hiệu quả**) · tra cứu từng khách (màn **Tra cứu khách**) — tất cả trong MỘT trang web | giao diện |
 | 17 | Cảnh báo | Chỉ xem trên web | Không nhắn Telegram/Zalo; cảnh báo hiện ở màn Tổng quan và Theo dõi | — |
 | 18 | Page mới | **Gửi đủ tệp ngay** | Tắt khởi động dần (trước đây 25% trong 3 ngày đầu) | `RAMP_UP_DAYS=0` |
@@ -62,7 +62,7 @@ khách mua 6 tháng trước (đã có SĐT) mà nay nhắn lại là khách ấ
 
 Bản clone chạy trên server riêng (host `banbot-antalo`), cài mới từ đầu ngày
 30/09/2026 — cách cài, cách deploy và các việc người quản trị tự làm (mở cổng,
-đặt mật khẩu, điền token) ở **[deploy/SERVER.md](../deploy/SERVER.md)**.
+điền token) ở **[deploy/SERVER.md](../deploy/SERVER.md)**.
 
 Lưu ý khi sửa `.env` trên server: giá trị ghi trong `.env` thắng giá trị mặc định
 trong code. Đừng chép `.env` từ nơi khác sang mà không xem lại các dòng

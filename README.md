@@ -156,7 +156,7 @@ npm run seed:demo                            # dữ liệu mẫu để xem trang
 ## Trang web
 
 Chỉ có **một** trang web (thư mục `web/`, Next.js). Dashboard riêng trước đây (cổng 8446)
-đã gộp vào ngày 30/09/2026 — một link, một lần đăng nhập.
+đã gộp vào ngày 30/09/2026 — chỉ còn một link.
 
 | Màn | Trả lời câu hỏi |
 |---|---|
@@ -167,7 +167,7 @@ Chỉ có **một** trang web (thư mục `web/`, Next.js). Dashboard riêng tr�
 | **Hiệu quả** | **Tin nào ra đơn nhiều nhất** · khách chốt ở ngày thứ mấy · chốt qua đường nào |
 | **Tra cứu khách** | Tìm theo tên · SĐT · PSID → khách đó đã nhận gì, sắp nhận gì, đã chốt/từ chối chưa |
 
-Đăng nhập do nginx lo (`deploy/mo-cong.sh`). Khi sửa kịch bản, **id của từng tin được giữ
+Trên server web mở **không đăng nhập** (chủ dự án chọn — xem `deploy/SERVER.md` để bật lại). Khi sửa kịch bản, **id của từng tin được giữ
 nguyên** — tạo bản ghi mới thì báo cáo "tin nào ra đơn" sẽ mất sạch lịch sử của tin cũ.
 
 Số liệu hội thoại cho màn Kịch bản: `npm run chat:phan-tich -- --page <id> --so 100`
@@ -273,7 +273,7 @@ src/scripts/                 check-db · check-tokens · page:add · page:list �
                              smoke-test.ts (271 kiểm tra) · dev-db.ts · seed-demo.ts
 config/                      pos-shops.json (gitignore, chép từ .example) — khoá POS từng shop
 kich-ban/                    nội dung kịch bản (mau.json là khung)
-deploy/                      deploy.sh · mo-cong.sh (mở cổng + mật khẩu) · SERVER.md · crontab + systemd mẫu
+deploy/                      deploy.sh · mo-cong.sh (mở cổng + bật nginx) · SERVER.md · crontab + systemd mẫu
 web/                         trang web duy nhất (Next.js) — src/app/broadcast.tsx · api/ · lib/report.ts (báo cáo)
 ecosystem.config.cjs         pm2
 ```

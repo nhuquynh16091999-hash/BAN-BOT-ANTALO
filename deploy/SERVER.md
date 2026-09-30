@@ -11,13 +11,13 @@ repo). CentOS Stream 9, **1 CPU, ~1GB RAM + 2,3GB swap**, cài tại `/opt/banbo
 > hay file nginx của họ, và giữ Bắn bot nhẹ: không build Next.js trên máy.
 >
 > Dashboard riêng (cổng 8446, pm2 `banbot-web`) đã **gộp vào trang web chính**
-> ngày 30/09/2026 — chỉ còn một link, một lần đăng nhập.
+> ngày 30/09/2026 — chỉ còn một link.
 
 | Thành phần | Giá trị |
 |---|---|
-| Web (trang DUY NHẤT) | `https://<IP>:8447` — nginx (HTTPS + đăng nhập) → 127.0.0.1:3112. Gồm cả soạn kịch bản, bắn tay, theo dõi, hiệu quả, tra cứu khách |
+| Web (trang DUY NHẤT) | `https://<IP>:8447` — nginx (HTTPS, **không đăng nhập**) → 127.0.0.1:3112. Gồm cả soạn kịch bản, bắn tay, theo dõi, hiệu quả, tra cứu khách |
 | Ảnh gửi cho khách | `http://<IP>:8448/api/media/…` — nginx, KHÔNG đăng nhập, chỉ mở đúng đường dẫn ảnh |
-| Đăng nhập | tài khoản `admin`, file `/etc/nginx/banbot.htpasswd` |
+| Đăng nhập | **Không có** — chủ dự án chọn ngày 30/09/2026. Ai biết link đều vào được, xem được khách và bấm gửi tin. nginx gửi `X-Robots-Tag: noindex` để công cụ tìm kiếm không lưu trang. Bật lại: xem cuối file |
 | Database | PostgreSQL 16 (`dnf module postgresql:16`), database `banbot`, vai trò `root` qua socket — **không mật khẩu**, chỉ nghe localhost |
 | Cấu hình Postgres | `/var/lib/pgsql/data/conf.d-banbot.conf` — shared_buffers 64MB, max_connections 60 |
 | Bí mật | `/opt/banbot/.env`, `/opt/banbot/web/.env.local` (chmod 600) — KHÔNG có trong git |
@@ -32,7 +32,7 @@ repo). CentOS Stream 9, **1 CPU, ~1GB RAM + 2,3GB swap**, cài tại `/opt/banbo
 3. Đẩy code (`deploy/deploy.sh` làm phần này), viết `.env` + `web/.env.local`, `node dist/db/migrate.js`
 4. `pm2 start ecosystem.config.cjs --only banbot-ui,banbot-send,banbot-sync,banbot-pos,banbot-health && pm2 save`
 5. **Người quản trị tự chạy** `ssh -t banbot-antalo bash /opt/banbot/deploy/mo-cong.sh`:
-   SELinux cho nginx dùng cổng 8447 + 8448, mở tường lửa, đặt mật khẩu đăng nhập, bật nginx.
+   SELinux cho nginx dùng cổng 8447 + 8448, mở tường lửa, bật nginx. Không hỏi gì.
    Bước này đổi thiết lập bảo mật của máy nên không nằm trong deploy tự động.
 6. Điền token thật vào `/opt/banbot/.env`: `PANCAKE_CRM_TOKEN` (bắt buộc),
    `FB_USER_ACCESS_TOKEN` + `FB_APP_SECRET` (đường dự phòng). Chưa điền thì engine
@@ -126,3 +126,22 @@ pm2 delete banbot-ui banbot-send banbot-sync banbot-pos banbot-health && pm2 sav
 rm /etc/nginx/conf.d/banbot.conf && systemctl reload nginx
 # dữ liệu vẫn còn trong database banbot — xoá riêng nếu muốn: dropdb banbot
 ```
+
+## Bật lại đăng nhập
+
+Web đang mở không đăng nhập theo lựa chọn của chủ dự án. Muốn khoá lại:
+
+```bash
+htpasswd -B -c /etc/nginx/banbot.htpasswd admin     # gõ mật khẩu 2 lần (cần terminal gõ được)
+chown root:nginx /etc/nginx/banbot.htpasswd && chmod 640 /etc/nginx/banbot.htpasswd
+```
+
+Rồi thêm vào khối `listen 8447` trong `/etc/nginx/conf.d/banbot.conf`:
+
+```nginx
+    auth_basic           "Ban bot";
+    auth_basic_user_file /etc/nginx/banbot.htpasswd;
+```
+
+và `nginx -t && systemctl reload nginx`. Cách không cần mật khẩu: chỉ cho vài IP vào
+(`allow <IP>; deny all;` trong cùng khối).
