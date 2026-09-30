@@ -2,6 +2,7 @@ import EmbeddedPostgres from "embedded-postgres";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * npm run test:smoke — chạy THẬT toàn bộ SQL trên một Postgres nhúng tạm.
@@ -502,83 +503,50 @@ try {
 
     await query(`DELETE FROM pages WHERE page_id = 'SMOKE_POS'`);
 
-    // ═══ 15. DASHBOARD ══════════════════════════════════════════════════════
-    section("Dashboard");
-    const htmlLib = await import("../web/html.js");
+    // ═══ 15. BÁO CÁO TRÊN GIAO DIỆN CHÍNH ═══════════════════════════════════
+    // Dashboard riêng (cổng 8446) đã gộp vào giao diện chính. Truy vấn báo cáo
+    // nằm ở web/src/lib/report.ts — ngoài src/ nên nạp bằng đường dẫn động.
+    section("Báo cáo trên giao diện chính");
+    const webReport = await import(pathToFileURL(resolve("web/src/lib/report.ts")).href);
+    const webDb = await import(pathToFileURL(resolve("web/src/lib/db.ts")).href);
 
-    // XSS: tên khách lấy từ Facebook, không được tin
-    const evil = '<script>alert(1)</script>';
-    eq("esc chặn thẻ script", htmlLib.esc(evil), "&lt;script&gt;alert(1)&lt;/script&gt;");
-    eq("esc chặn ngoặc kép trong thuộc tính", htmlLib.esc('" onload="x'), "&quot; onload=&quot;x");
-    eq("esc xử lý null", htmlLib.esc(null), "");
-    eq("truncate cắt và thêm dấu …", htmlLib.truncate("abcdefghij", 5), "abcd…");
-    eq("truncate gộp khoảng trắng", htmlLib.truncate("a\n\nb   c", 20), "a b c");
-
-    // Dựng dữ liệu có thật để render
-    const dPage = await pagesRepo.upsert({ pageId: "SMOKE_WEB", pageName: "Page dashboard", market: "Test", utcOffset, pancakeShopId: "SHOP_9" });
+    const dPage = await pagesRepo.upsert({ pageId: "SMOKE_WEB", pageName: "Page báo cáo", market: "Test", utcOffset, pancakeShopId: "SHOP_9" });
     await pagesRepo.setActive(dPage.id, true, 100);
-    const dScript = await scriptsRepo.replaceActiveScript(dPage.id, "KB dashboard", messages, { journeyDays: 7, slotsPerDay: 4 });
-    // Khách có tên độc hại — phải bị escape khi hiện ra
-    await customersRepo.upsertBatch(dPage.id, [
-        { ...mk("W_EVIL", 1), name: evil },
-        mk("W_OK", 2),
-    ]);
+    const dScript = await scriptsRepo.replaceActiveScript(dPage.id, "KB báo cáo", messages, { journeyDays: 7, slotsPerDay: 4 });
+    await customersRepo.upsertBatch(dPage.id, [mk("W_BUY", 1), mk("W_OK", 2)]);
     await planPage((await pagesRepo.findById(dPage.id))!, log);
 
-    // Một khách nhận tin rồi chốt đơn → có dữ liệu cho báo cáo quy công
-    const evilCust = (await customersRepo.findByPsid(dPage.id, "W_EVIL"))!;
+    // Một khách nhận tin #3 rồi chốt đơn → có dữ liệu cho báo cáo quy công
+    const buyer = (await customersRepo.findByPsid(dPage.id, "W_BUY"))!;
     const dMsgs = await scriptsRepo.messagesForScript(dScript.script.id);
     await query(
         `INSERT INTO send_log (customer_id, page_id, script_message_id, journey_day, slot_index, channel, success, sent_at)
          VALUES ($1, $2, $3, 1, 0, 'pancake', TRUE, now() - interval '2 hours')`,
-        [evilCust.id, dPage.id, dMsgs[2]!.id]
+        [buyer.id, dPage.id, dMsgs[2]!.id]
     );
-    await customersRepo.stop(evilCust.id, "converted", "Chốt đơn thử");
-    await customersRepo.recordEvent(evilCust.id, dPage.id, "ordered", 1, { orderId: "DH-WEB" });
+    await customersRepo.stop(buyer.id, "converted", "Chốt đơn thử");
+    await customersRepo.recordEvent(buyer.id, dPage.id, "ordered", 1, { via: "pos" });
 
-    const { createDashboardServer } = await import("../web/server.js");
-    const web = createDashboardServer();
-    const webPort = 19000 + Math.floor(Math.random() * 900);
-    await new Promise<void>((r) => web.listen(webPort, () => r()));
-    const wb = `http://127.0.0.1:${webPort}`;
-    const get = async (p: string) => {
-        const r = await fetch(wb + p);
-        return { status: r.status, body: await r.text() };
-    };
+    const perf = await webReport.messagePerformance(dPage.id);
+    eq("Bảng hiệu quả có đủ 12 tin", perf.length, 12);
+    eq("⭐ Quy công đúng vào tin cuối nhận trước lúc chốt", perf.find((m: { order_index: number }) => m.order_index === 2)?.conversions, 1);
+    eq("…các tin khác không được tính công", perf.filter((m: { conversions: number }) => m.conversions > 0).length, 1);
+    eq("Khách chốt ở ngày 1", await webReport.conversionByDay(dPage.id), [{ journey_day: 1, n: 1 }]);
+    eq("Chốt qua đường nào: POS", await webReport.conversionBySource(dPage.id), [{ via: "pos", n: 1 }]);
 
-    const homeRes = await get("/");
-    eq("GET / trả 200", homeRes.status, 200);
-    check("Trang chủ có tên page", homeRes.body.includes("Page dashboard"));
-    check("Trang chủ là HTML hoàn chỉnh", homeRes.body.startsWith("<!doctype html>") && homeRes.body.includes("</html>"));
+    const foundByPsid = await webReport.searchCustomers("W_OK");
+    check("Tra cứu theo PSID ra đúng khách", foundByPsid.length === 1 && foundByPsid[0].psid === "W_OK");
+    eq("Tra cứu theo tên, không phân biệt hoa thường", (await webReport.searchCustomers("khách w_buy")).length, 1);
+    eq("⭐ Ký tự % _ trong ô tìm được hiểu đúng nghĩa đen, không khớp bừa", (await webReport.searchCustomers("%_")).length, 0);
+    eq("Ô tìm rỗng → không trả gì", (await webReport.searchCustomers("   ")).length, 0);
 
-    const pageRes = await get(`/page/${dPage.id}`);
-    eq("GET /page/:id trả 200", pageRes.status, 200);
-    check("⭐ Tên khách độc hại bị escape, KHÔNG chèn được script", !pageRes.body.includes("<script>alert(1)</script>"));
-    check("…và vẫn hiện ra dạng văn bản", pageRes.body.includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
+    const det = await webReport.customerDetail(buyer.id);
+    check("Chi tiết khách: có lịch sử gửi và sự kiện chốt đơn",
+        det !== null && det.sends.length === 1 && det.events.some((e: { type: string }) => e.type === "ordered"));
+    eq("…trạng thái đã chốt", det?.customer.status, "converted");
+    eq("Khách không tồn tại → null", await webReport.customerDetail(999999), null);
+    check("Nhật ký chạy nền đọc được", Array.isArray(await webReport.recentJobRuns(5)));
 
-    eq("GET /page/:id/script trả 200", (await get(`/page/${dPage.id}/script`)).status, 200);
-    check("Trang kịch bản có bảng xoay vòng", (await get(`/page/${dPage.id}/script`)).body.includes("Lịch một khách sẽ nhận"));
-
-    const repRes = await get(`/report?page=${dPage.id}`);
-    eq("GET /report trả 200", repRes.status, 200);
-    check("Báo cáo quy công cho tin #3 (tin cuối trước khi chốt)", repRes.body.includes("Tin nào ra đơn nhiều nhất"));
-    const perf = await (await import("../db/repositories/report.repo.js")).messagePerformance(dPage.id);
-    eq("⭐ Quy công đúng vào tin cuối nhận trước lúc chốt", perf.find((m) => m.order_index === 2)?.conversions, 1);
-    eq("…các tin khác không được tính công", perf.filter((m) => m.conversions > 0).length, 1);
-
-    eq("GET /customer/:id trả 200", (await get(`/customer/${evilCust.id}`)).status, 200);
-    eq("GET /search có kết quả", (await get("/search?q=W_OK")).status, 200);
-    check("Tìm theo PSID ra đúng khách", (await get("/search?q=W_OK")).body.includes("W_OK"));
-    eq("GET /jobs trả 200", (await get("/jobs")).status, 200);
-    eq("GET /healthz trả 200", (await get("/healthz")).status, 200);
-    eq("Trang không tồn tại → 404", (await get("/khong-co-trang-nay")).status, 404);
-    eq("Page id không tồn tại → 404", (await get("/page/999999")).status, 404);
-    eq("Khách id không tồn tại → 404", (await get("/customer/999999")).status, 404);
-    // Chỉ /page/:id/script nhận POST; mọi đường dẫn khác không có chỗ ghi
-    eq("POST vào đường dẫn không ghi được → 404", (await fetch(wb + "/", { method: "POST", headers: { Origin: wb } })).status, 404);
-    eq("PUT/DELETE vẫn bị từ chối hoàn toàn", (await fetch(wb + "/", { method: "DELETE" })).status, 405);
-
-    await new Promise<void>((r) => web.close(() => r()));
     await query(`DELETE FROM pages WHERE page_id = 'SMOKE_WEB'`);
 
     // ═══ 16. ĐIỂM VÀO JOB (isMain) ══════════════════════════════════════════
@@ -657,46 +625,6 @@ try {
     eq("…và KHÔNG ghi đè tin nào khi có lỗi (transaction)",
         (await scriptsRepo.messagesForScript(eScript.script.id))[2]?.body, eMsgs[2]?.body);
 
-    // HTTP: form + chống CSRF
-    const { createDashboardServer: mkSrv } = await import("../web/server.js");
-    const web2 = mkSrv();
-    const port2 = 19900 + Math.floor(Math.random() * 90);
-    await new Promise<void>((r) => web2.listen(port2, () => r()));
-    const base2 = `http://127.0.0.1:${port2}`;
-
-    eq("GET trang sửa trả 200", (await fetch(`${base2}/page/${ePage.id}/script/edit`)).status, 200);
-    const editHtml = await (await fetch(`${base2}/page/${ePage.id}/script/edit`)).text();
-    check("Form có đủ 12 ô nhập", (editHtml.match(/name="body_\d+"/g) ?? []).length === 12);
-    check("Trang kịch bản có nút Sửa", (await (await fetch(`${base2}/page/${ePage.id}/script`)).text()).includes("Sửa nội dung"));
-
-    const formBody = new URLSearchParams({ "body_0": "Sửa qua web", "media_0": "", "label_0": "web" });
-    const noRef = await fetch(`${base2}/page/${ePage.id}/script`, {
-        method: "POST", body: formBody, redirect: "manual",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-    eq("⭐ POST không có Origin/Referer → 403 (chống CSRF)", noRef.status, 403);
-    eq("…nội dung KHÔNG bị đổi", (await scriptsRepo.messagesForScript(eScript.script.id))[0]?.body, "Nội dung MỚI cho tin 1");
-
-    const withOrigin = await fetch(`${base2}/page/${ePage.id}/script`, {
-        method: "POST", body: formBody, redirect: "manual",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: base2 },
-    });
-    eq("POST từ đúng trang → 303 chuyển hướng", withOrigin.status, 303);
-    check("…chuyển về trang sửa kèm báo đã lưu", (withOrigin.headers.get("location") ?? "").includes("saved=1"));
-    eq("…nội dung đã lưu thật", (await scriptsRepo.messagesForScript(eScript.script.id))[0]?.body, "Sửa qua web");
-
-    const evilOrigin = await fetch(`${base2}/page/${ePage.id}/script`, {
-        method: "POST", body: new URLSearchParams({ "body_0": "HACK" }), redirect: "manual",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "http://ke-gian.example.com" },
-    });
-    eq("⭐ POST từ trang lạ → 403", evilOrigin.status, 403);
-    eq("…nội dung vẫn nguyên", (await scriptsRepo.messagesForScript(eScript.script.id))[0]?.body, "Sửa qua web");
-
-    eq("POST vào đường dẫn không nhận dữ liệu → 404",
-        (await fetch(`${base2}/`, { method: "POST", headers: { Origin: base2 } })).status, 404);
-    eq("PUT vẫn bị từ chối", (await fetch(`${base2}/`, { method: "PUT" })).status, 405);
-
-    await new Promise<void>((r) => web2.close(() => r()));
     await query(`DELETE FROM pages WHERE page_id = 'SMOKE_EDIT'`);
 
     // ═══ 18. PHÂN TÍCH HỘI THOẠI ════════════════════════════════════════════
@@ -851,55 +779,13 @@ try {
     eq("Phân tích lại thì ghi đè, không nhân đôi",
         (await queryOne<{ n: number }>(`SELECT COUNT(*)::int AS n FROM page_analysis WHERE page_id = $1`, [sPage.id]))?.n, 1);
 
-    // HTTP
-    const web3 = mkSrv();
-    const port3 = 19700 + Math.floor(Math.random() * 90);
-    await new Promise<void>((r) => web3.listen(port3, () => r()));
-    const b3 = `http://127.0.0.1:${port3}`;
-
-    const soanTrong = await (await fetch(`${b3}/page/${sPage.id}/soan`)).text();
-    check("Chưa có kịch bản → hiện bảng khung để xem trước", soanTrong.includes("Tạo khung 12 tin"));
-    check("…và nêu đúng giá trong phần xem trước", soanTrong.includes("SAR 100"));
-
-    const taoRes = await fetch(`${b3}/page/${sPage.id}/soan/tao`, {
-        method: "POST", redirect: "manual", headers: { Origin: b3 },
-    });
-    eq("Bấm tạo khung → 303", taoRes.status, 303);
-    check("…chuyển về màn hình soạn kèm báo đã tạo", (taoRes.headers.get("location") ?? "").includes("created=1"));
-
-    const created = await scriptsRepo.activeScriptForPage(sPage.id);
-    check("Kịch bản đã được tạo", created !== null);
-    const cMsgs = await scriptsRepo.messagesForScript(created!.id);
-    eq("Đủ 12 tin", cMsgs.length, 12);
-    check("Nhãn lấy từ khung gợi ý", (cMsgs[1]?.label ?? "").includes("báo giá"));
-
-    const soanCo = await (await fetch(`${b3}/page/${sPage.id}/soan`)).text();
-    check("Màn hình soạn có đủ 12 ô nhập", (soanCo.match(/name="body_\d+"/g) ?? []).length === 12);
-    check("⭐ Ô chưa nhập được đánh dấu để không bỏ sót", soanCo.includes("chưa nhập"));
-    check("…và đếm số ô còn thiếu", /còn 12\/12 ô chưa nhập/.test(soanCo));
-    check("Hiện số liệu hội thoại ngay trên đầu", soanCo.includes("Hội thoại đã đọc"));
-    check("Hiện danh sách vấn đề của khách", soanCo.includes("Vấn đề khiến khách không chốt"));
-
-    // Nhập nội dung rồi lưu, quay về đúng màn hình soạn
-    const fill = new URLSearchParams();
-    for (let i = 0; i < 12; i++) {
-        fill.set(`body_${i}`, `Nội dung thật cho tin ${i + 1}`);
-        fill.set(`media_${i}`, "");
-        fill.set(`label_${i}`, cMsgs[i]?.label ?? `tin ${i + 1}`);
-    }
-    const luu = await fetch(`${b3}/page/${sPage.id}/script`, {
-        method: "POST", body: fill, redirect: "manual",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: b3, Referer: `${b3}/page/${sPage.id}/soan` },
-    });
-    eq("Lưu từ màn hình soạn → 303", luu.status, 303);
-    check("⭐ Quay về đúng màn hình soạn, không nhảy sang màn hình sửa",
-        (luu.headers.get("location") ?? "").includes("/soan?saved=1"));
-    const after = await scriptsRepo.messagesForScript(created!.id);
-    eq("Nội dung đã lưu thật", after[0]?.body, "Nội dung thật cho tin 1");
-    const soanXong = await (await fetch(`${b3}/page/${sPage.id}/soan`)).text();
-    check("…và màn hình báo đã nhập đủ", soanXong.includes("đã nhập đủ 12 ô"));
-
-    await new Promise<void>((r) => web3.close(() => r()));
+    // Giao diện chính đọc lại số liệu + gợi ý 12 ô (lưu kèm lúc phân tích)
+    await scriptsRepo.saveAnalysis(sPage.id, { ...sReport, slots }, fakeConvs.length);
+    const shown = await webReport.pageAnalysis(sPage.id);
+    check("Giao diện đọc được số liệu hội thoại của page", shown !== null && shown.conversations === fakeConvs.length);
+    eq("…kèm giá đang báo", [shown?.report.prices?.[0]?.currency, shown?.report.prices?.[0]?.amount], ["SAR", 100]);
+    eq("⭐ …và đủ 12 gợi ý cho 12 ô soạn", shown?.report.slots?.length, 12);
+    eq("Page chưa phân tích → null (giao diện nhắc lệnh chạy)", await webReport.pageAnalysis(dPage.id + 99999), null);
     await query(`DELETE FROM pages WHERE page_id = 'SMOKE_SOAN'`);
 
     // ═══ 20. BẮN TAY TỪ GIAO DIỆN ═══════════════════════════════════════════
@@ -1070,6 +956,7 @@ try {
 
     await query(`DELETE FROM pages WHERE page_id IN ('SMOKE_PHONE', 'SMOKE_NOON')`);
 
+    await webDb.pool.end();
     await closePool();
 } catch (err) {
     failed++;

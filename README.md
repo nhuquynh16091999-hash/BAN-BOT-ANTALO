@@ -35,8 +35,8 @@ Nghiệp vụ đang áp dụng (chốt 29/09/2026 qua bộ 20 câu hỏi): **[do
   Pancake POS ▶ ┌───────────┐  số đơn tăng → converted, huỷ lượt còn chờ
                 │  5 · POS  │  (không cần ai gắn tag hay nối hệ thống ngoài)
                 └───────────┘
-                ┌───────────┐  đọc mọi bảng trên, KHÔNG ghi gì
-   người xem ◀─ │ DASHBOARD │  tổng quan · hiệu quả tin · tra cứu khách
+                ┌───────────┐  MỘT trang web: soạn kịch bản · bắn tay · theo dõi
+   người dùng ◀▶│  WEB (web/)│  · hiệu quả tin · tra cứu khách · nhật ký chạy nền
                 └───────────┘
 ```
 
@@ -69,11 +69,11 @@ Dùng cho máy dev; trên VPS dùng Postgres cài đặt thật.
 ## Kiểm tra
 
 ```bash
-npm run test:smoke          # 309 kiểm tra tích hợp trên Postgres nhúng tạm
+npm run test:smoke          # 271 kiểm tra tích hợp trên Postgres nhúng tạm
 ```
 
 Bộ kiểm tra dựng DB sạch, chạy migration, rồi đi qua đúng luồng SYNC → PLAN → SEND →
-POS → HEALTH → WEBHOOK → DASHBOARD bằng dữ liệu giả. Không cần token. Nó kiểm chứng những thứ khó nhìn bằng mắt:
+POS → HEALTH → WEBHOOK → BÁO CÁO bằng dữ liệu giả. Không cần token. Nó kiểm chứng những thứ khó nhìn bằng mắt:
 
 - `UNIQUE (customer_id, journey_day, slot_index)` — chạy PLAN hai lần không xếp trùng
 - `FOR UPDATE SKIP LOCKED` — ba worker song song không ai lấy trùng lượt của ai
@@ -83,9 +83,9 @@ POS → HEALTH → WEBHOOK → DASHBOARD bằng dữ liệu giả. Không cần 
 - Page bị ngưng → `pickBatch` không lấy gì dù lượt đã tới hạn
 - Quy đổi giờ địa phương → UTC cho cả Riyadh (+3) lẫn Tokyo (+9)
 - Mốc chuẩn POS: khách mua từ trước vẫn được nuôi dưỡng, mua thêm thì mới dừng
-- Dashboard escape tên khách lấy từ Facebook (không chèn được thẻ script)
 - Báo cáo quy công đúng vào tin cuối khách nhận trước lúc chốt
-- Sửa kịch bản trên web: giữ nguyên id tin, chặn POST từ trang lạ (CSRF)
+- Sửa kịch bản: giữ nguyên id tin, không làm mất lịch sử báo cáo
+- Tra cứu khách: ký tự `%` `_` trong ô tìm được hiểu đúng nghĩa đen
 
 Phần **không** được phủ: gọi API Pancake/Facebook thật (cần token — dùng `npm run check:tokens`).
 
@@ -135,7 +135,7 @@ Không dùng pm2? Xem `deploy/crontab.example` + `deploy/banbot-webhook.service`
 | pos     | mỗi 15 phút   | đối chiếu đơn từ Pancake POS → dừng chuỗi cho khách vừa chốt   |
 | health  | mỗi 15 phút   | đọc `send_log` 60 phút → pause / degrade / recover từng page   |
 | webhook | liên tục      | `POST /webhook/message` · `POST /webhook/order` · `GET /health` |
-| web     | liên tục      | dashboard chỉ đọc ở cổng 8090                                  |
+| ui      | liên tục      | trang web duy nhất (Next.js, thư mục `web/`)                  |
 
 ## Lệnh hay dùng
 
@@ -149,36 +149,29 @@ npm run job:pos    -- --page <id> --dry-run  # xem POS có bao nhiêu khách c�
 npm run job:health -- --page <id>
 npm run test:smoke                           # bộ kiểm tra tích hợp
 npm run db:dev                               # Postgres nhúng cho máy dev
-npm run web                                  # dashboard
-npm run seed:demo                            # dữ liệu mẫu để xem dashboard
+npm --prefix web run dev                     # trang web ở máy dev
+npm run seed:demo                            # dữ liệu mẫu để xem trang web
 ```
 
-## Dashboard
+## Trang web
 
-```bash
-npm run web        # → http://localhost:8090
-```
+Chỉ có **một** trang web (thư mục `web/`, Next.js). Dashboard riêng trước đây (cổng 8446)
+đã gộp vào ngày 30/09/2026 — một link, một lần đăng nhập.
 
-Sửa được **nội dung kịch bản** ngay trên web (`/page/:id/script/edit`) — việc này làm hằng tuần,
-bắt SSH vào server sửa file JSON là không dùng được. Mọi thứ còn lại (thêm page, **bật/tắt page**,
-hàng đợi gửi) vẫn chỉ qua CLI, nên dashboard không thể tự ý bật một chiến dịch.
-
-Form lưu có chặn CSRF bằng `Origin`/`Referer`. Khi sửa, **id của từng tin được giữ nguyên** — nếu
-tạo bản ghi mới thì báo cáo "tin nào ra đơn" sẽ mất sạch lịch sử của tin cũ.
-
-| Trang | Trả lời câu hỏi |
+| Màn | Trả lời câu hỏi |
 |---|---|
-| `/` Tổng quan | Page nào đang chạy, bao nhiêu khách đang nuôi, hôm nay gửi được bao nhiêu, page nào đang bị ngưng |
-| `/page/:id` | Khách phân bố ở ngày nào, hàng đợi ra sao, lỗi gì trong 24h, sức khoẻ page theo từng 15 phút |
-| `/page/:id/script` | 12 nội dung + bảng lịch: khách nhận tin số mấy vào ngày nào |
-| `/page/:id/script/edit` | **sửa nội dung ngay trên web** — ô nào chưa điền xong có cảnh báo |
-| `/report` | **Tin nào ra đơn nhiều nhất** · khách thường chốt ở ngày thứ mấy |
-| `/customer/:id` | Một khách đã nhận gì, lúc nào, qua kênh nào, sắp nhận gì |
-| `/search?q=` | Tra theo tên · số điện thoại · PSID |
+| **Tổng quan** | Page nào đang chạy, bao nhiêu khách gửi được, page nào chưa có kịch bản / đang bị ngưng |
+| **Theo dõi** | Gửi được / lỗi trong 24h, lỗi nghĩa là gì + cần làm gì, từng page gửi ra sao, **nhật ký chạy nền** |
+| **Kịch bản tự động** | Soạn 12 tin, dán ảnh, **chép từ page khác**, bật/tắt page; **số liệu hội thoại thật** ngay trên đầu nếu đã chạy phân tích |
+| **Bắn tay** | Chọn khách rồi gửi ngay một tin tuỳ ý (vẫn qua cầu dao page + nhật ký) |
+| **Hiệu quả** | **Tin nào ra đơn nhiều nhất** · khách chốt ở ngày thứ mấy · chốt qua đường nào |
+| **Tra cứu khách** | Tìm theo tên · SĐT · PSID → khách đó đã nhận gì, sắp nhận gì, đã chốt/từ chối chưa |
 
-Bảo vệ bằng HTTP Basic: đặt `DASHBOARD_PASSWORD` trong `.env` (bỏ trống = mở, chỉ nên dùng khi
-chạy local). Trang tự đổi sáng/tối theo hệ điều hành, không gọi CDN nào — chạy được cả khi VPS
-bị chặn ra ngoài.
+Đăng nhập do nginx lo (`deploy/mo-cong.sh`). Khi sửa kịch bản, **id của từng tin được giữ
+nguyên** — tạo bản ghi mới thì báo cáo "tin nào ra đơn" sẽ mất sạch lịch sử của tin cũ.
+
+Số liệu hội thoại cho màn Kịch bản: `npm run chat:phan-tich -- --page <id> --so 100`
+(đọc ~100 hội thoại gần nhất, không dùng AI, không tốn phí).
 
 ### Cách tính "tin nào ra đơn nhiều nhất"
 
@@ -192,7 +185,7 @@ tín hiệu thật để anh/chị viết lại tin #3.
 ```bash
 npm run db:dev      # cửa sổ 1: Postgres nhúng
 npm run seed:demo   # cửa sổ 2: dựng 4 page mẫu ~900 khách, nhật ký gửi, đơn hàng
-npm run web         # → http://localhost:8090
+npm --prefix web run dev   # → http://localhost:3001 (web/.env.local cần DATABASE_URL)
 ```
 
 `seed:demo` **xoá sạch** mọi page có tiền tố `DEMO_` rồi tạo lại; không đụng page thật. Chỉ chạy
@@ -274,14 +267,14 @@ migrations/                  001_init (schema gốc) · 002_pos (mốc chuẩn P
 src/config/                  env (zod) · bảng múi giờ thị trường
 src/domain/                  journey.ts (công thức xoay vòng) · rules.ts (tag mua hàng, từ khoá từ chối) · types.ts
 src/clients/                 pancake.ts (quét + gửi chính) · facebook.ts (dự phòng, thang 4 tag) · pos.ts (đơn hàng)
-src/db/                      pool · migrate · repositories/ (pages, customers, scripts, queue, health, report)
+src/db/                      pool · migrate · repositories/ (pages, customers, scripts, queue, health)
 src/jobs/                    sync · plan · send · pos · health · webhook
-src/web/                     server.ts (định tuyến) · views.ts (các trang) · html.ts (CSS + escape)
 src/scripts/                 check-db · check-tokens · page:add · page:list · script:seed
-                             smoke-test.ts (309 kiểm tra) · dev-db.ts · seed-demo.ts
+                             smoke-test.ts (271 kiểm tra) · dev-db.ts · seed-demo.ts
 config/                      pos-shops.json (gitignore, chép từ .example) — khoá POS từng shop
 kich-ban/                    nội dung kịch bản (mau.json là khung)
-deploy/                      crontab + systemd mẫu
+deploy/                      deploy.sh · mo-cong.sh (mở cổng + mật khẩu) · SERVER.md · crontab + systemd mẫu
+web/                         trang web duy nhất (Next.js) — src/app/broadcast.tsx · api/ · lib/report.ts (báo cáo)
 ecosystem.config.cjs         pm2
 ```
 
@@ -296,4 +289,4 @@ ecosystem.config.cjs         pm2
 | Biết ai đã chốt | không | POS + webhook + tag → dừng chuỗi |
 | Sức khoẻ page | cầu dao 30' | đo mỗi 15', hãm tốc trước khi bị chặn, leo thang |
 | Nơi chạy | Mac cá nhân | VPS 24/7 |
-| Đo hiệu quả | không có | dashboard: tin nào ra đơn, chốt ở ngày mấy |
+| Đo hiệu quả | không có | màn Hiệu quả: tin nào ra đơn, chốt ở ngày mấy, qua đường nào |

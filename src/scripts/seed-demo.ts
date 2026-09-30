@@ -9,7 +9,7 @@ import * as customersRepo from "../db/repositories/customers.repo.js";
 import { parseFile } from "./seed-script.js";
 
 /**
- * npm run seed:demo — dựng dữ liệu MẪU để xem dashboard trước khi có dữ liệu thật.
+ * npm run seed:demo — dựng dữ liệu MẪU để xem giao diện trước khi có dữ liệu thật.
  *
  * ⚠️ XOÁ SẠCH mọi page có tiền tố DEMO_ rồi tạo lại. Không đụng page thật.
  *    Chỉ chạy trên database dev.
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
         console.log(`  ✅ ${spec.name.padEnd(16)} ${st.active} đang nuôi · ${st.converted} đã chốt · ${logRows.length} dòng nhật ký`);
     }
 
-    console.log(`\n✅ Xong. Chạy: npm run web  → http://localhost:${process.env.DASHBOARD_PORT ?? 8090}\n`);
+    console.log(`\n✅ Xong. Chạy giao diện: npm --prefix web run dev → http://localhost:3001\n`);
 }
 
 main()

@@ -164,7 +164,7 @@ interface Schedule {
     health: string;
 }
 
-type Screen = "tong-quan" | "theo-doi" | "kich-ban" | "ban-tay";
+type Screen = "tong-quan" | "theo-doi" | "kich-ban" | "ban-tay" | "hieu-qua" | "tra-cuu";
 
 // ─── Gọi API ──────────────────────────────────────────────────────────────────
 const KEY_STORE = "banbot_key";
@@ -1193,6 +1193,658 @@ function ManualScreen({
     );
 }
 
+// ═══ Gộp từ dashboard cũ (cổng 8446) ══════════════════════════════════════════
+// Trước đây báo cáo, tra cứu khách và nhật ký job nằm ở một trang web riêng với
+// link + đăng nhập riêng. Nay gộp về đây: một link, một lần đăng nhập.
+
+function dt(iso: string | null | undefined): string {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function short(s: string | null | undefined, n: number): string {
+    const t = (s ?? "").replace(/\s+/g, " ").trim();
+    return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+}
+
+function Bar({ value, max, tone = "var(--ok)" }: { value: number; max: number; tone?: string }) {
+    const w = max > 0 ? Math.round((value / max) * 100) : 0;
+    return (
+        <div className="h-2 w-full min-w-[60px] rounded-full" style={{ background: "var(--line-soft)" }}>
+            <div className="h-2 rounded-full" style={{ width: `${w}%`, background: tone }} />
+        </div>
+    );
+}
+
+function PanelHead({ title, hint, right }: { title: string; hint?: string; right?: React.ReactNode }) {
+    return (
+        <div
+            className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3.5"
+            style={{ borderColor: "var(--line)" }}
+        >
+            <div>
+                <h2 className="text-[15px] font-bold">{title}</h2>
+                {hint && (
+                    <p className="mt-0.5 text-[12.5px]" style={{ color: "var(--ink-3)" }}>
+                        {hint}
+                    </p>
+                )}
+            </div>
+            {right}
+        </div>
+    );
+}
+
+/** Gọi API GET rồi trả dữ liệu; lỗi thì ném ra câu tiếng Việt từ máy chủ. */
+async function getJson<T>(url: string): Promise<T> {
+    const r = await apiFetch(url);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error ?? `Lỗi ${r.status}`);
+    return d as T;
+}
+
+// ─── Màn Hiệu quả: tin nào ra đơn ─────────────────────────────────────────────
+
+const NGUON_CHOT: Record<string, string> = {
+    pos: "Đơn mới trên POS",
+    tag: "Tag mua hàng",
+    phone: "Để lại SĐT",
+    webhook: "Hệ thống khác báo về",
+    khac: "Không rõ",
+};
+
+interface ReportData {
+    perf: Array<{ order_index: number; label: string | null; body: string; sent: number; failed: number; conversions: number }>;
+    byDay: Array<{ journey_day: number | null; n: number }>;
+    bySource: Array<{ via: string; n: number }>;
+}
+
+function ReportScreen({ page }: { page: PageInfo }) {
+    const [data, setData] = useState<ReportData | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+        setData(null);
+        setErr(null);
+        getJson<ReportData>(`/api/report?pageId=${encodeURIComponent(page.pageId)}`)
+            .then((d) => alive && setData(d))
+            .catch((e) => alive && setErr(e instanceof Error ? e.message : "Lỗi"));
+        return () => {
+            alive = false;
+        };
+    }, [page.pageId]);
+
+    if (err) return <div className="panel"><Empty title="Không tải được báo cáo" hint={err} /></div>;
+    if (!data) return <div className="panel"><Empty title="Đang tải báo cáo…" /></div>;
+
+    const orders = data.byDay.reduce((a, d) => a + d.n, 0);
+    const sent = data.perf.reduce((a, m) => a + m.sent, 0);
+    const maxConv = Math.max(1, ...data.perf.map((m) => m.conversions));
+    const maxDay = Math.max(1, ...data.byDay.map((d) => d.n));
+    const best = [...data.perf].sort((a, b) => b.conversions - a.conversions)[0];
+
+    return (
+        <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Stat value={num(orders)} label="Khách đã chốt" hint="dừng chuỗi vì chốt đơn" tone="var(--ok)" />
+                <Stat value={num(sent)} label="Tin đã gửi" hint="theo kịch bản đang chạy" />
+                <Stat value={sent > 0 ? pct(orders / sent) : "—"} label="Đơn / tin gửi" hint="càng cao càng tốt" />
+                <Stat
+                    value={best && best.conversions > 0 ? `Tin ${best.order_index + 1}` : "—"}
+                    label="Tin ra đơn nhiều nhất"
+                    hint={best && best.conversions > 0 ? best.label || short(best.body, 32) : "chưa có đơn"}
+                    tone="var(--ok)"
+                />
+            </div>
+
+            <div className="panel overflow-hidden">
+                <PanelHead
+                    title="Tin nào ra đơn nhiều nhất"
+                    hint={
+                        orders === 0
+                            ? "Chưa có khách nào chốt — bảng có số khi POS, tag, SĐT hoặc webhook ghi nhận đơn đầu tiên."
+                            : `Mỗi khách đã chốt được tính cho tin CUỐI CÙNG họ nhận trước lúc chốt. Tổng ${num(orders)} đơn.`
+                    }
+                />
+                {data.perf.length === 0 ? (
+                    <Empty title="Page này chưa có kịch bản" hint="Soạn ở màn Kịch bản tự động." />
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="tbl min-w-[820px]">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Khung</th>
+                                    <th>Nội dung</th>
+                                    <th className="text-right">Đã gửi</th>
+                                    <th className="text-right">Lỗi</th>
+                                    <th className="text-right">Ra đơn</th>
+                                    <th />
+                                    <th className="text-right">Tỉ lệ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.perf.map((m) => (
+                                    <tr key={m.order_index}>
+                                        <td className="num font-bold">{m.order_index + 1}</td>
+                                        <td className="num">{SLOT_HOURS[m.order_index % SLOT_HOURS.length]}h</td>
+                                        <td>
+                                            {m.label && <div className="font-semibold">{m.label}</div>}
+                                            <div style={{ color: "var(--ink-3)" }}>{short(m.body === "—" ? "" : m.body, 70) || "—"}</div>
+                                        </td>
+                                        <td className="num text-right">{num(m.sent)}</td>
+                                        <td className="num text-right" style={{ color: m.failed ? "var(--bad)" : undefined }}>
+                                            {m.failed ? num(m.failed) : "—"}
+                                        </td>
+                                        <td className="num text-right font-bold" style={{ color: m.conversions ? "var(--ok)" : undefined }}>
+                                            {m.conversions ? num(m.conversions) : "—"}
+                                        </td>
+                                        <td className="w-[120px]"><Bar value={m.conversions} max={maxConv} /></td>
+                                        <td className="num text-right">{m.sent > 0 ? pct(m.conversions / m.sent) : "—"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-2">
+                <div className="panel overflow-hidden">
+                    <PanelHead title="Khách chốt ở ngày thứ mấy" hint="Giúp quyết định chuỗi nên dài hay ngắn" />
+                    {data.byDay.length === 0 ? (
+                        <Empty title="Chưa có đơn nào" />
+                    ) : (
+                        <div className="space-y-2.5 px-5 py-4">
+                            {data.byDay.map((d) => (
+                                <div key={String(d.journey_day)} className="flex items-center gap-3 text-[13px]">
+                                    <span className="w-20 shrink-0">{d.journey_day ? `Ngày ${d.journey_day}` : "Không rõ"}</span>
+                                    <Bar value={d.n} max={maxDay} />
+                                    <span className="num w-20 shrink-0 text-right">
+                                        <b>{num(d.n)}</b> · {pct(d.n / orders)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <div className="panel overflow-hidden">
+                    <PanelHead title="Chốt qua đường nào" hint="Hệ thống biết khách đã chốt nhờ đâu" />
+                    {data.bySource.length === 0 ? (
+                        <Empty title="Chưa có đơn nào" />
+                    ) : (
+                        <div className="space-y-2.5 px-5 py-4">
+                            {data.bySource.map((s) => (
+                                <div key={s.via} className="flex items-center gap-3 text-[13px]">
+                                    <span className="w-40 shrink-0">{NGUON_CHOT[s.via] ?? s.via}</span>
+                                    <Bar value={s.n} max={orders} tone="var(--brand)" />
+                                    <span className="num w-20 shrink-0 text-right">
+                                        <b>{num(s.n)}</b> · {pct(s.n / orders)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Màn Tra cứu khách ────────────────────────────────────────────────────────
+
+const TRANG_THAI_KHACH: Record<string, { ten: string; kind: "ok" | "warn" | "bad" | "brand" | "muted" }> = {
+    active: { ten: "Đang nhận tin", kind: "brand" },
+    converted: { ten: "Đã chốt", kind: "ok" },
+    opted_out: { ten: "Từ chối nhận tin", kind: "bad" },
+    expired: { ten: "Hết chuỗi", kind: "muted" },
+};
+
+const SU_KIEN: Record<string, string> = {
+    entered: "Vào tệp",
+    replied: "Khách trả lời",
+    ordered: "Chốt đơn",
+    opted_out: "Từ chối nhận tin",
+    expired: "Hết chuỗi",
+    restarted: "Quay lại chuỗi",
+};
+
+interface CustRow {
+    id: number;
+    page_name: string;
+    psid: string;
+    name: string | null;
+    phone: string | null;
+    status: string;
+    journey_day: number;
+    journey_count: number;
+    order_count: number;
+    order_count_baseline: number | null;
+    last_interaction_at: string;
+    first_seen_at: string;
+    stop_reason: string | null;
+    sent_count: number;
+}
+
+interface CustDetail {
+    customer: CustRow;
+    sends: Array<{
+        sent_at: string; journey_day: number | null; slot_index: number | null; channel: string;
+        success: boolean; error_kind: string | null; error_message: string | null;
+        order_index: number | null; label: string | null; body: string | null;
+    }>;
+    events: Array<{ type: string; journey_day: number | null; payload: Record<string, unknown>; occurred_at: string }>;
+    upcoming: Array<{ scheduled_at: string; journey_day: number; slot_index: number; order_index: number | null; manual: boolean }>;
+}
+
+function StatusChip({ status }: { status: string }) {
+    const s = TRANG_THAI_KHACH[status] ?? { ten: status, kind: "muted" as const };
+    return <Chip kind={s.kind}>{s.ten}</Chip>;
+}
+
+function LookupScreen() {
+    const [q, setQ] = useState("");
+    const [rows, setRows] = useState<CustRow[] | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [detail, setDetail] = useState<CustDetail | null>(null);
+    const [err, setErr] = useState<string | null>(null);
+
+    const search = async (e?: React.FormEvent) => {
+        e?.preventDefault();
+        const term = q.trim();
+        if (term.length < 2) return;
+        setLoading(true);
+        setErr(null);
+        setDetail(null);
+        try {
+            const d = await getJson<{ customers: CustRow[] }>(`/api/customers?q=${encodeURIComponent(term)}`);
+            setRows(d.customers);
+        } catch (e2) {
+            setErr(e2 instanceof Error ? e2.message : "Lỗi");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const open = async (id: number) => {
+        setErr(null);
+        try {
+            setDetail(await getJson<CustDetail>(`/api/customers?id=${id}`));
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        } catch (e2) {
+            setErr(e2 instanceof Error ? e2.message : "Lỗi");
+        }
+    };
+
+    return (
+        <div className="space-y-5">
+            <form className="panel flex flex-wrap items-center gap-3 px-5 py-4" onSubmit={search}>
+                <input
+                    className="field max-w-[420px] flex-1"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Tên, số điện thoại hoặc PSID của khách"
+                    autoFocus
+                />
+                <button className="btn btn-primary" disabled={loading || q.trim().length < 2}>
+                    {loading ? "Đang tìm…" : "Tìm"}
+                </button>
+                <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>
+                    Tìm trên mọi page
+                </span>
+            </form>
+
+            {err && <div className="panel"><Empty title="Không tra cứu được" hint={err} /></div>}
+
+            {detail && <CustomerCard d={detail} onClose={() => setDetail(null)} />}
+
+            {rows && (
+                <div className="panel overflow-hidden">
+                    <PanelHead title={`${num(rows.length)} khách khớp "${q.trim()}"`} hint="Bấm vào một dòng để xem khách đó đã nhận gì" />
+                    {rows.length === 0 ? (
+                        <Empty title="Không tìm thấy khách nào" />
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="tbl min-w-[860px]">
+                                <thead>
+                                    <tr>
+                                        <th>Khách</th>
+                                        <th>Page</th>
+                                        <th>SĐT</th>
+                                        <th>Trạng thái</th>
+                                        <th className="text-right">Ngày</th>
+                                        <th className="text-right">Đã nhận</th>
+                                        <th>Nhắn cuối</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {rows.map((c) => (
+                                        <tr key={c.id} className="cursor-pointer" onClick={() => void open(c.id)}>
+                                            <td>
+                                                <div className="font-semibold">{c.name ?? "(không tên)"}</div>
+                                                <div className="mono" style={{ color: "var(--ink-3)" }}>{c.psid}</div>
+                                            </td>
+                                            <td>{c.page_name}</td>
+                                            <td className="mono">{c.phone ?? "—"}</td>
+                                            <td>
+                                                <StatusChip status={c.status} />
+                                                {c.stop_reason && (
+                                                    <div className="mt-0.5 text-[11.5px]" style={{ color: "var(--ink-3)" }}>
+                                                        {short(c.stop_reason, 44)}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="num text-right">{c.journey_day}</td>
+                                            <td className="num text-right">{num(c.sent_count)}</td>
+                                            <td style={{ color: "var(--ink-3)" }}>{ago(c.last_interaction_at)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function CustomerCard({ d, onClose }: { d: CustDetail; onClose: () => void }) {
+    const c = d.customer;
+    return (
+        <div className="space-y-5">
+            <div className="panel px-5 py-4">
+                <div className="flex flex-wrap items-center gap-3">
+                    <h2 className="text-[17px] font-bold">{c.name ?? "(không tên)"}</h2>
+                    <span className="mono" style={{ color: "var(--ink-3)" }}>{c.psid}</span>
+                    <StatusChip status={c.status} />
+                    <span className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>{c.page_name}</span>
+                    <button className="btn btn-ghost btn-sm ml-auto" onClick={onClose}>Đóng</button>
+                </div>
+                {c.stop_reason && (
+                    <p className="mt-1 text-[13px]" style={{ color: "var(--ink-2)" }}>Lý do dừng: {c.stop_reason}</p>
+                )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+                <Stat value={String(c.journey_day)} label="Ngày trong chuỗi" hint={c.journey_count > 1 ? `lần thứ ${c.journey_count} vào chuỗi` : "lần đầu"} tone="var(--brand)" />
+                <Stat value={num(c.sent_count)} label="Đã nhận" hint="tin gửi thành công" />
+                <Stat value={num(c.order_count)} label="Đơn trên POS" hint={c.order_count_baseline !== null ? `mốc lúc vào chuỗi: ${c.order_count_baseline}` : "chưa đối chiếu"} />
+                <Stat value={c.phone ?? "—"} label="SĐT" />
+                <Stat value={ago(c.last_interaction_at)} label="Nhắn cuối" hint={dt(c.last_interaction_at)} />
+                <Stat value={ago(c.first_seen_at)} label="Vào tệp" hint={dt(c.first_seen_at)} />
+            </div>
+
+            {d.upcoming.length > 0 && (
+                <div className="panel overflow-hidden">
+                    <PanelHead title="Sắp nhận" />
+                    <div className="overflow-x-auto">
+                        <table className="tbl min-w-[520px]">
+                            <thead><tr><th>Lúc</th><th className="text-right">Ngày</th><th>Khung</th><th>Tin</th></tr></thead>
+                            <tbody>
+                                {d.upcoming.map((u, i) => (
+                                    <tr key={i}>
+                                        <td className="num">{dt(u.scheduled_at)}</td>
+                                        <td className="num text-right">{u.journey_day}</td>
+                                        <td className="num">{u.manual ? "bắn tay" : `${SLOT_HOURS[u.slot_index] ?? "?"}h`}</td>
+                                        <td>{u.order_index !== null ? `Tin ${u.order_index + 1}` : "Nội dung bắn tay"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            <div className="panel overflow-hidden">
+                <PanelHead title="Đã nhận gì" hint="60 lượt gửi gần nhất, cả thành công lẫn lỗi" />
+                {d.sends.length === 0 ? (
+                    <Empty title="Chưa nhận tin nào" />
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="tbl min-w-[820px]">
+                            <thead><tr><th>Lúc</th><th className="text-right">Ngày</th><th>Tin</th><th>Kênh</th><th>Kết quả</th></tr></thead>
+                            <tbody>
+                                {d.sends.map((s, i) => (
+                                    <tr key={i}>
+                                        <td className="num">{dt(s.sent_at)}</td>
+                                        <td className="num text-right">{s.journey_day ?? "—"}</td>
+                                        <td>
+                                            <div className="font-semibold">{s.order_index !== null ? `Tin ${s.order_index + 1}${s.label ? ` · ${s.label}` : ""}` : "Bắn tay"}</div>
+                                            <div style={{ color: "var(--ink-3)" }}>{short(s.body, 60)}</div>
+                                        </td>
+                                        <td>{s.channel === "pancake" ? "Pancake" : "Facebook"}</td>
+                                        <td>
+                                            {s.success ? (
+                                                <Chip kind="ok">đã gửi</Chip>
+                                            ) : (
+                                                <>
+                                                    <Chip kind="bad">{(LOI[s.error_kind ?? ""] ?? LOI.UNKNOWN!).ten}</Chip>
+                                                    <div className="mt-0.5 text-[11.5px]" style={{ color: "var(--ink-3)" }}>{short(s.error_message, 70)}</div>
+                                                </>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            <div className="panel overflow-hidden">
+                <PanelHead title="Sự kiện" />
+                {d.events.length === 0 ? (
+                    <Empty title="Chưa có sự kiện" />
+                ) : (
+                    <div className="divide-y" style={{ borderColor: "var(--line-soft)" }}>
+                        {d.events.map((e, i) => (
+                            <div key={i} className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-[13px]">
+                                <span className="num w-28 shrink-0">{dt(e.occurred_at)}</span>
+                                <Chip kind={e.type === "ordered" ? "ok" : e.type === "opted_out" ? "bad" : "muted"}>{SU_KIEN[e.type] ?? e.type}</Chip>
+                                {e.journey_day && <span style={{ color: "var(--ink-3)" }}>ngày {e.journey_day}</span>}
+                                {typeof e.payload?.via === "string" && (
+                                    <span style={{ color: "var(--ink-3)" }}>qua {NGUON_CHOT[e.payload.via] ?? e.payload.via}</span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ─── Nhật ký job (hiện trong màn Theo dõi) ────────────────────────────────────
+
+const TEN_JOB: Record<string, string> = {
+    sync: "Đồng bộ khách",
+    plan: "Xếp lịch",
+    send: "Gửi tin",
+    pos: "Đối chiếu POS",
+    health: "Sức khoẻ page",
+    webhook: "Webhook",
+};
+
+interface JobRun {
+    job: string;
+    page_name: string | null;
+    started_at: string;
+    finished_at: string | null;
+    ok: boolean | null;
+    stats: Record<string, unknown>;
+    error: string | null;
+}
+
+function JobsPanel() {
+    const [runs, setRuns] = useState<JobRun[] | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+        const load = () =>
+            getJson<{ runs: JobRun[] }>("/api/jobs")
+                .then((d) => alive && setRuns(d.runs))
+                .catch(() => { /* vòng tự cập nhật — không báo lỗi liên tục */ });
+        void load();
+        const id = setInterval(load, 30_000);
+        return () => {
+            alive = false;
+            clearInterval(id);
+        };
+    }, []);
+
+    return (
+        <div className="panel overflow-hidden">
+            <PanelHead title="Nhật ký chạy nền" hint="30 lượt gần nhất của các việc tự động — dòng đỏ là việc bị lỗi" />
+            {!runs ? (
+                <Empty title="Đang tải…" />
+            ) : runs.length === 0 ? (
+                <Empty title="Chưa có lượt chạy nào" />
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="tbl min-w-[820px]">
+                        <thead><tr><th>Bắt đầu</th><th>Việc</th><th>Page</th><th className="text-right">Mất</th><th>Kết quả</th><th>Chi tiết</th></tr></thead>
+                        <tbody>
+                            {runs.map((r, i) => {
+                                const secs = r.finished_at
+                                    ? Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000)
+                                    : null;
+                                return (
+                                    <tr key={i}>
+                                        <td className="num">{dt(r.started_at)}</td>
+                                        <td className="font-semibold">{TEN_JOB[r.job] ?? r.job}</td>
+                                        <td>{r.page_name ?? "—"}</td>
+                                        <td className="num text-right">{secs === null ? "đang chạy" : `${secs}s`}</td>
+                                        <td>
+                                            {r.ok === null ? <Chip kind="warn">đang chạy</Chip> : r.ok ? <Chip kind="ok">ok</Chip> : <Chip kind="bad">lỗi</Chip>}
+                                        </td>
+                                        <td className="mono text-[11.5px]" style={{ color: r.error ? "var(--bad)" : "var(--ink-3)" }}>
+                                            {r.error ? short(r.error, 110) : short(JSON.stringify(r.stats), 110)}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── Số liệu hội thoại thật (hiện trên màn Kịch bản) ──────────────────────────
+
+const TEN_NGON_NGU: Record<string, string> = {
+    ar: "Ả Rập", ja: "Nhật", zh: "Trung", ko: "Hàn", th: "Thái", vi: "Việt", latin: "Anh", unknown: "không rõ",
+};
+
+interface ChatAnalysis {
+    report: {
+        conversations?: number;
+        withCustomerMessage?: number;
+        priceAskedFirstTurn?: number;
+        phoneRate?: number;
+        prices?: Array<{ currency: string; amount: number; count: number }>;
+        langs?: Array<{ lang: string; pct: number }>;
+        objections?: Array<{ label: string; count: number; samples?: string[] }>;
+        slots?: Array<{ label: string; hint: string; seed?: string }>;
+    };
+    conversations: number;
+    analyzed_at: string;
+}
+
+function AnalysisPanel({ page }: { page: PageInfo }) {
+    const [a, setA] = useState<ChatAnalysis | null | undefined>(undefined);
+
+    useEffect(() => {
+        let alive = true;
+        setA(undefined);
+        getJson<{ analysis: ChatAnalysis | null }>(`/api/analysis?pageId=${encodeURIComponent(page.pageId)}`)
+            .then((d) => alive && setA(d.analysis))
+            .catch(() => alive && setA(null));
+        return () => {
+            alive = false;
+        };
+    }, [page.pageId]);
+
+    if (a === undefined) return null;
+    if (a === null) {
+        return (
+            <details className="panel px-5 py-3 text-[13px]">
+                <summary className="cursor-pointer font-semibold" style={{ color: "var(--ink-2)" }}>
+                    Muốn soạn dựa trên hội thoại thật của page này?
+                </summary>
+                <p className="mt-2" style={{ color: "var(--ink-2)" }}>
+                    Hệ thống đọc khoảng 100 hội thoại gần nhất rồi cho biết khách hay hỏi gì, giá đang báo bao nhiêu,
+                    vướng ở đâu, và gợi ý mỗi ô nên nói gì. Chạy một lần trên server (vài phút, không tốn phí):
+                </p>
+                <code className="mono mt-1.5 block rounded-md px-3 py-2" style={{ background: "var(--card-2)" }}>
+                    node dist/scripts/phan-tich-chat.js --page {page.pageId} --so 100
+                </code>
+            </details>
+        );
+    }
+
+    const r = a.report;
+    const price = r.prices?.[0];
+    const lang = r.langs?.[0];
+    return (
+        <div className="panel overflow-hidden">
+            <PanelHead
+                title={`Số liệu từ ${num(a.conversations)} hội thoại thật`}
+                hint={`Phân tích lúc ${dt(a.analyzed_at)} — dùng để quyết định mỗi ô nên nói gì`}
+            />
+            <div className="grid grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-4">
+                <Stat
+                    value={r.withCustomerMessage ? pct((r.priceAskedFirstTurn ?? 0) / r.withCustomerMessage) : "—"}
+                    label="Hỏi giá ngay câu đầu"
+                    hint="nên báo giá ở tin 1–2"
+                    tone="var(--brand)"
+                />
+                <Stat value={price ? `${price.currency} ${price.amount}` : "—"} label="Giá đang báo" hint={price ? `${price.count} lần` : "không thấy trong hội thoại"} />
+                <Stat value={pct(r.phoneRate ?? 0)} label="Để lại SĐT" hint="tỉ lệ hiện tại" tone="var(--ok)" />
+                <Stat value={lang ? TEN_NGON_NGU[lang.lang] ?? lang.lang : "—"} label="Ngôn ngữ chính" hint={lang ? pct(lang.pct) : undefined} />
+            </div>
+            {(r.objections?.length ?? 0) > 0 && (
+                <div className="border-t px-5 py-3.5" style={{ borderColor: "var(--line-soft)" }}>
+                    <div className="mb-1.5 text-[13px] font-bold">Vấn đề khiến khách không chốt</div>
+                    <ul className="space-y-1.5 text-[13px]">
+                        {r.objections!.slice(0, 6).map((o) => (
+                            <li key={o.label}>
+                                <b>{o.label}</b> <span style={{ color: "var(--ink-3)" }}>— {num(o.count)} hội thoại</span>
+                                {o.samples?.[0] && (
+                                    <div className="text-[12.5px]" style={{ color: "var(--ink-3)" }}>“{short(o.samples[0], 110)}”</div>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            {(r.slots?.length ?? 0) > 0 && (
+                <details className="border-t px-5 py-3.5 text-[13px]" style={{ borderColor: "var(--line-soft)" }}>
+                    <summary className="cursor-pointer font-bold">Gợi ý cho từng ô (theo đúng số liệu trên)</summary>
+                    <ol className="mt-2 space-y-2">
+                        {r.slots!.map((s, i) => (
+                            <li key={i}>
+                                <b>Ô {i + 1} · {s.label}</b>
+                                <div style={{ color: "var(--ink-2)" }}>💡 {s.hint}</div>
+                                {s.seed && (
+                                    <div className="mt-0.5 text-[12.5px]" style={{ color: "var(--ink-3)" }}>
+                                        Nhân viên đang dùng: “{short(s.seed, 200)}”
+                                    </div>
+                                )}
+                            </li>
+                        ))}
+                    </ol>
+                </details>
+            )}
+        </div>
+    );
+}
+
 // ═══ ỨNG DỤNG ═════════════════════════════════════════════════════════════════
 
 export default function App() {
@@ -1524,6 +2176,8 @@ export default function App() {
         { key: "theo-doi", label: "Theo dõi", needsPage: false },
         { key: "kich-ban", label: "Kịch bản tự động", needsPage: true },
         { key: "ban-tay", label: "Bắn tay", needsPage: true },
+        { key: "hieu-qua", label: "Hiệu quả", needsPage: true },
+        { key: "tra-cuu", label: "Tra cứu khách", needsPage: false },
     ];
 
     return (
@@ -1624,8 +2278,17 @@ export default function App() {
                         onOpenPage={(pid) => goto(pid, "kich-ban")}
                     />
                 )}
+                {screen === "theo-doi" && (
+                    <div className="mt-5">
+                        <JobsPanel />
+                    </div>
+                )}
 
-                {screen !== "tong-quan" && screen !== "theo-doi" && !page && (
+                {screen === "tra-cuu" && <LookupScreen />}
+
+                {screen === "hieu-qua" && page && <ReportScreen page={page} />}
+
+                {screen !== "tong-quan" && screen !== "theo-doi" && screen !== "tra-cuu" && !page && (
                     <div className="panel">
                         <Empty
                             title="Chưa chọn page"
@@ -1639,6 +2302,11 @@ export default function App() {
                     </div>
                 )}
 
+                {screen === "kich-ban" && page && (
+                    <div className="mb-5">
+                        <AnalysisPanel page={page} />
+                    </div>
+                )}
                 {screen === "kich-ban" && page && (
                     <ScriptScreen
                         page={page}

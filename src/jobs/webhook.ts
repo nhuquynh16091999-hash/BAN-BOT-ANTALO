@@ -107,7 +107,7 @@ export async function onOrder(ev: OrderEvent): Promise<string> {
 
     const changed = await customersRepo.stop(cust.id, "converted", `Đã chốt đơn${ev.orderId ? " " + ev.orderId : ""}`);
     const cancelled = await queueRepo.cancelPendingForCustomer(cust.id, "Khách đã chốt đơn");
-    await customersRepo.recordEvent(cust.id, page.id, "ordered", cust.journey_day, { orderId: ev.orderId });
+    await customersRepo.recordEvent(cust.id, page.id, "ordered", cust.journey_day, { via: "webhook", orderId: ev.orderId });
     log.info({ pageId: ev.pageId, psid: ev.psid, orderId: ev.orderId, journeyDay: cust.journey_day, cancelled }, "🎉 Chốt đơn — dừng chuỗi");
     return changed ? "đã dừng chuỗi" : "khách đã dừng từ trước";
 }

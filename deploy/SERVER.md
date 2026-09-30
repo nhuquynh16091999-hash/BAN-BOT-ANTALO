@@ -6,16 +6,18 @@ repo). CentOS Stream 9, **1 CPU, ~1GB RAM + 2,3GB swap**, cài tại `/opt/banbo
 > ⚠️ Đây là bản **clone**. Không deploy, không SSH, không đụng tới server hay repo
 > GitHub của dự án cũ.
 >
-> Máy này **chạy chung** dự án TALPHA dashboard (`/opt/talpha`, pm2 `talpha-*`,
-> cổng 3000). Đừng đụng tiến trình của họ, và giữ Bắn bot nhẹ: không build
-> Next.js trên máy, không chạy thứ không cần.
+> Máy này **chạy chung** dự án khác: TALPHA dashboard (`/opt/talpha`, pm2
+> `talpha-*`, cổng 3000) và AI Sale (nginx cổng 80 + 8449). Đừng đụng tiến trình
+> hay file nginx của họ, và giữ Bắn bot nhẹ: không build Next.js trên máy.
+>
+> Dashboard riêng (cổng 8446, pm2 `banbot-web`) đã **gộp vào trang web chính**
+> ngày 30/09/2026 — chỉ còn một link, một lần đăng nhập.
 
 | Thành phần | Giá trị |
 |---|---|
-| Giao diện chính | `https://<IP>:8447` — nginx (HTTPS + đăng nhập) → 127.0.0.1:3112 |
-| Dashboard báo cáo | `https://<IP>:8446` — nginx (HTTPS + đăng nhập) → 127.0.0.1:3110 |
+| Web (trang DUY NHẤT) | `https://<IP>:8447` — nginx (HTTPS + đăng nhập) → 127.0.0.1:3112. Gồm cả soạn kịch bản, bắn tay, theo dõi, hiệu quả, tra cứu khách |
 | Ảnh gửi cho khách | `http://<IP>:8448/api/media/…` — nginx, KHÔNG đăng nhập, chỉ mở đúng đường dẫn ảnh |
-| Đăng nhập | một tài khoản `admin` chung cho 8446 + 8447, file `/etc/nginx/banbot.htpasswd` |
+| Đăng nhập | tài khoản `admin`, file `/etc/nginx/banbot.htpasswd` |
 | Database | PostgreSQL 16 (`dnf module postgresql:16`), database `banbot`, vai trò `root` qua socket — **không mật khẩu**, chỉ nghe localhost |
 | Cấu hình Postgres | `/var/lib/pgsql/data/conf.d-banbot.conf` — shared_buffers 64MB, max_connections 60 |
 | Bí mật | `/opt/banbot/.env`, `/opt/banbot/web/.env.local` (chmod 600) — KHÔNG có trong git |
@@ -27,9 +29,9 @@ repo). CentOS Stream 9, **1 CPU, ~1GB RAM + 2,3GB swap**, cài tại `/opt/banbo
 1. `dnf module enable postgresql:16 && dnf install postgresql-server nginx httpd-tools policycoreutils-python-utils`
 2. `postgresql-setup --initdb`, thêm `conf.d-banbot.conf`, `createuser root`, `createdb -O root banbot`
 3. Đẩy code (`deploy/deploy.sh` làm phần này), viết `.env` + `web/.env.local`, `node dist/db/migrate.js`
-4. `pm2 start ecosystem.config.cjs --only banbot-ui,banbot-web,banbot-send,banbot-sync,banbot-pos,banbot-health && pm2 save`
+4. `pm2 start ecosystem.config.cjs --only banbot-ui,banbot-send,banbot-sync,banbot-pos,banbot-health && pm2 save`
 5. **Người quản trị tự chạy** `ssh -t banbot-antalo bash /opt/banbot/deploy/mo-cong.sh`:
-   SELinux cho nginx dùng cổng 8446–8448, mở tường lửa, đặt mật khẩu đăng nhập, bật nginx.
+   SELinux cho nginx dùng cổng 8447 + 8448, mở tường lửa, đặt mật khẩu đăng nhập, bật nginx.
    Bước này đổi thiết lập bảo mật của máy nên không nằm trong deploy tự động.
 6. Điền token thật vào `/opt/banbot/.env`: `PANCAKE_CRM_TOKEN` (bắt buộc),
    `FB_USER_ACCESS_TOKEN` + `FB_APP_SECRET` (đường dự phòng). Chưa điền thì engine
@@ -44,8 +46,7 @@ HTTP/HTTPS.
 
 | Tên | Lịch | Việc |
 |---|---|---|
-| `banbot-ui` | liên tục | giao diện chính (Next.js) |
-| `banbot-web` | liên tục | dashboard báo cáo |
+| `banbot-ui` | liên tục | trang web duy nhất (Next.js) |
 | `banbot-sync` | 5,20,35,50 | page đang 3h sáng giờ địa phương → quét đầy đủ; page khác → quét nhanh khách mới nhắn |
 | `banbot-send` | mỗi phút | gửi lượt tới hạn (cả theo lịch lẫn bắn tay) |
 | `banbot-pos` | 8,23,38,53 | đối chiếu đơn POS (cần `config/pos-shops.json`) |
@@ -116,7 +117,7 @@ nhận tin. Muốn mở: đặt `WEBHOOK_SECRET`, chạy `banbot-webhook`, thêm
 ## Gỡ cài đặt
 
 ```bash
-pm2 delete banbot-ui banbot-web banbot-send banbot-sync banbot-pos banbot-health && pm2 save
+pm2 delete banbot-ui banbot-send banbot-sync banbot-pos banbot-health && pm2 save
 rm /etc/nginx/conf.d/banbot.conf && systemctl reload nginx
 # dữ liệu vẫn còn trong database banbot — xoá riêng nếu muốn: dropdb banbot
 ```

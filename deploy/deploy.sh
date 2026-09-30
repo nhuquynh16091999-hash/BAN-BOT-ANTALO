@@ -23,7 +23,8 @@ npx tsc --noEmit
 npm run test:smoke
 
 echo "▶ Biên dịch engine + giao diện…"
-npm run build
+# Xoá dist cũ trước: tsc không tự dọn file của mã đã xoá, rsync --delete sẽ đẩy nguyên bản sạch
+rm -rf dist && npm run build
 (cd web && rm -rf .next && npx next build)
 
 echo "▶ Đẩy engine lên $HOST:$DIR…"
@@ -44,7 +45,8 @@ ssh "$HOST" "cd $DIR \
   && npm ci --omit=dev --silent \
   && node dist/db/migrate.js \
   && cd web && npm ci --omit=dev --silent && cd $DIR \
-  && pm2 restart banbot-web banbot-ui --update-env \
+  && (pm2 delete banbot-web >/dev/null 2>&1 || true) \
+  && pm2 restart banbot-ui --update-env \
   && pm2 save >/dev/null"
 
 # CẢNH BÁO: pm2 restart KHÔNG nạp lại cron_restart. Đổi lịch trong
@@ -59,9 +61,8 @@ if [ "${RELOAD_CRON:-0}" = "1" ]; then
 fi
 
 echo "▶ Kiểm tra còn sống…"
-ssh "$HOST" "curl -s -o /dev/null -w 'dashboard → HTTP %{http_code}\n' http://127.0.0.1:3110/healthz
-             curl -s -o /dev/null -w 'giao diện → HTTP %{http_code}\n' http://127.0.0.1:3112/
+ssh "$HOST" "curl -s -o /dev/null -w 'giao diện → HTTP %{http_code}\n' http://127.0.0.1:3112/
              curl -s -o /dev/null -w 'API page  → HTTP %{http_code}\n' 'http://127.0.0.1:3112/api/broadcast?getPages=true'"
 
 IP=$(ssh -G "$HOST" | awk '/^hostname /{print $2}')
-echo "✅ Xong → giao diện https://$IP:8447 · dashboard https://$IP:8446"
+echo "✅ Xong → https://$IP:8447"

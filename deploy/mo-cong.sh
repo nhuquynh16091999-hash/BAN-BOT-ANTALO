@@ -4,14 +4,14 @@
 #   ssh -t root@<server> bash /opt/banbot/deploy/mo-cong.sh
 #
 # Script này đổi thiết lập bảo mật của máy chủ nên không tự chạy trong deploy:
-#   1. SELinux: cho nginx nghe cổng 8446–8448 và chuyển tiếp vào app trên máy
-#   2. Tường lửa: mở cổng 8446–8448
+#   1. SELinux: cho nginx nghe cổng 8447 (web) + 8448 (ảnh) và chuyển tiếp vào app
+#   2. Tường lửa: mở cổng 8447 + 8448
 #   3. Tạo tài khoản đăng nhập web (tên admin) — mật khẩu do người chạy tự gõ
 #   4. Bật nginx
 # Chạy lại lần nữa vẫn an toàn; bước 3 hỏi trước khi thay mật khẩu cũ.
 set -euo pipefail
 
-PORTS=(8446 8447 8448)
+PORTS=(8447 8448)
 HTPASSWD=/etc/nginx/banbot.htpasswd
 
 echo "1/4 SELinux: cho nginx dùng cổng ${PORTS[*]}…"
@@ -24,7 +24,7 @@ fi
 
 echo "2/4 Tường lửa: mở cổng ${PORTS[*]}…"
 if systemctl is-active --quiet firewalld; then
-    firewall-cmd --permanent --add-port=8446-8448/tcp >/dev/null
+    firewall-cmd --permanent --add-port=8447-8448/tcp >/dev/null
     firewall-cmd --reload >/dev/null
 fi
 
@@ -48,6 +48,4 @@ systemctl reload nginx
 
 IP=$(hostname -I | awk '{print $1}')
 echo
-echo "✅ Xong. Đăng nhập bằng admin + mật khẩu vừa đặt:"
-echo "   Giao diện chính : https://$IP:8447"
-echo "   Dashboard       : https://$IP:8446"
+echo "✅ Xong. Mở https://$IP:8447 — đăng nhập bằng admin + mật khẩu vừa đặt"

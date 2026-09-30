@@ -4,7 +4,7 @@ import { mapConcurrent } from "../lib/http.js";
 import * as pancake from "../clients/pancake.js";
 import * as pagesRepo from "../db/repositories/pages.repo.js";
 import * as scriptsRepo from "../db/repositories/scripts.repo.js";
-import { analyzeConversation, buildReport, type ChatReport, type ConversationFacts } from "../domain/chat-analysis.js";
+import { analyzeConversation, buildReport, suggestSlots, type ChatReport, type ConversationFacts } from "../domain/chat-analysis.js";
 
 /**
  * npm run chat:phan-tich -- --page <id> [--so 100]
@@ -179,7 +179,7 @@ if (isMain(import.meta.url)) {
         // Page chưa thêm vào hệ thống thì bỏ qua — báo cáo vẫn in ra bình thường.
         const dbPage = await pagesRepo.findByFbPageId(pageId);
         if (dbPage) {
-            await scriptsRepo.saveAnalysis(dbPage.id, report, usable.length);
+            await scriptsRepo.saveAnalysis(dbPage.id, { ...report, slots: suggestSlots(report, 12) }, usable.length);
             console.log(`  ✅ Đã lưu vào hệ thống — mở dashboard, trang của page này để soạn nội dung.\n`);
         } else {
             console.log(`  ⚠️  Page chưa có trong hệ thống nên chưa hiện được lên dashboard.`);

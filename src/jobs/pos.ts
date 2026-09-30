@@ -85,7 +85,7 @@ export async function reconcilePage(
     for (const id of applied.convertedIds) {
         stats.queueCancelled += await queueRepo.cancelPendingForCustomer(id, "Đã chốt đơn (POS)");
     }
-    await customersRepo.recordEvents(page.id, applied.convertedIds, "ordered");
+    await customersRepo.recordEvents(page.id, applied.convertedIds, "ordered", { via: "pos" });
 
     if (applied.converted > 0) {
         log.info(
