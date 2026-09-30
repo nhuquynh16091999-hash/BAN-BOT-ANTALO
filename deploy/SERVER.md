@@ -21,7 +21,8 @@ repo). CentOS Stream 9, **1 CPU, ~1GB RAM + 2,3GB swap**, cài tại `/opt/banbo
 | Database | PostgreSQL 16 (`dnf module postgresql:16`), database `banbot`, vai trò `root` qua socket — **không mật khẩu**, chỉ nghe localhost |
 | Cấu hình Postgres | `/var/lib/pgsql/data/conf.d-banbot.conf` — shared_buffers 64MB, max_connections 60 |
 | Bí mật | `/opt/banbot/.env`, `/opt/banbot/web/.env.local` (chmod 600) — KHÔNG có trong git |
-| nginx | `/etc/nginx/conf.d/banbot.conf`, chứng chỉ tự ký `/etc/nginx/certs/banbot.*` |
+| nginx | `/etc/nginx/conf.d/banbot.conf` |
+| Chứng chỉ 8447 | **Let's Encrypt cho IP** `/etc/letsencrypt/live/<IP>/` — trình duyệt không báo đỏ. Do cấu hình AI Sale (cùng máy) cấp, profile ngắn hạn ~6 ngày, `certbot-renew.timer` tự gia hạn qua cổng 80 rồi reload nginx. Dự phòng: chứng chỉ tự ký `/etc/nginx/certs/banbot.*` |
 | Log | `/root/.pm2/logs/banbot-*.log` |
 
 ## Cài lần đầu — thứ tự đã làm
@@ -36,6 +37,10 @@ repo). CentOS Stream 9, **1 CPU, ~1GB RAM + 2,3GB swap**, cài tại `/opt/banbo
 6. Điền token thật vào `/opt/banbot/.env`: `PANCAKE_CRM_TOKEN` (bắt buộc),
    `FB_USER_ACCESS_TOKEN` + `FB_APP_SECRET` (đường dự phòng). Chưa điền thì engine
    không lấy được khách nào.
+
+> ⚠️ Gia hạn chứng chỉ cần **nginx đang chạy** (cổng 80). Nginx chỉ bật sau khi
+> chạy `mo-cong.sh` — chạy trễ quá hạn chứng chỉ thì 8447 hết hạn, phải cấp lại.
+> Nếu gia hạn hỏng: đổi `ssl_certificate` trong banbot.conf về `/etc/nginx/certs/banbot.*` rồi reload.
 
 `web/.env.local` có `PUBLIC_URL=http://<IP>:8448` — link ảnh lưu kèm địa chỉ này
 để engine và Facebook tải được (Facebook không chấp nhận chứng chỉ tự ký, nên ảnh
