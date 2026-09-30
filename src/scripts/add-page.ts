@@ -1,7 +1,8 @@
 import { parseArgs } from "node:util";
 import { closePool } from "../db/pool.js";
 import { config } from "../config/index.js";
-import { MARKETS, MARKET_KEYS, isMarketKey } from "../config/markets.js";
+import { MARKETS, MARKET_KEYS, isMarketKey, type Market } from "../config/markets.js";
+import { currentUtcOffset } from "../lib/time.js";
 import * as pancake from "../clients/pancake.js";
 import * as pagesRepo from "../db/repositories/pages.repo.js";
 
@@ -44,13 +45,17 @@ async function main(): Promise<void> {
     const market = values.market.trim();
 
     let utcOffset: number;
+    let timezone: string | null = null;
     if (values.offset !== undefined) {
         utcOffset = Number(values.offset);
         if (!Number.isInteger(utcOffset) || utcOffset < -12 || utcOffset > 14) {
             throw new Error(`--offset phải là số nguyên từ -12 đến 14, nhận được "${values.offset}"`);
         }
     } else if (isMarketKey(market)) {
-        utcOffset = MARKETS[market].utcOffset;
+        // Thị trường có giờ mùa hè: lấy giờ HIỆN TẠI theo múi giờ, không lấy giờ mùa đông
+        const m: Market = MARKETS[market];
+        timezone = m.tz ?? null;
+        utcOffset = m.tz ? currentUtcOffset(m.tz) : m.utcOffset;
     } else {
         throw new Error(`Không biết thị trường "${market}". Dùng một trong: ${MARKET_KEYS.join(", ")} — hoặc thêm --offset <giờ>.`);
     }
@@ -67,7 +72,7 @@ async function main(): Promise<void> {
         console.log(`⚠️  Page ${pageId} có trong Pancake nhưng chưa có page_access_token — sync sẽ thử tạo token lúc chạy.`);
     }
 
-    const page = await pagesRepo.upsert({ pageId, pageName, market, utcOffset, pancakeShopId: values.shop ?? null });
+    const page = await pagesRepo.upsert({ pageId, pageName, market, utcOffset, pancakeShopId: values.shop ?? null, timezone });
 
     // Khởi động dần đang tắt (RAMP_UP_DAYS=0) → gửi đủ tệp ngay từ ngày đầu
     const rampStart = config.rampUp.days > 0 ? config.rampUp.startPercent : 100;

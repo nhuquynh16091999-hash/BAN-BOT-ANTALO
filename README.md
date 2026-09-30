@@ -111,8 +111,9 @@ npm run job:plan -- --page 123456789 --force --dry-run
 npm run page:add -- --page 123456789 --market Saudi --activate
 ```
 
-Thị trường có sẵn: Saudi · UAE · Kuwait · Oman · Qatar · Bahrain · Taiwan · Singapore · Japan
-(thị trường khác: thêm `--offset <giờ UTC>`).
+Thị trường có sẵn: Saudi · UAE · Kuwait · Oman · Qatar · Bahrain · Taiwan · Singapore · Philippines ·
+HongKong · Japan · Vietnam · Italy (thị trường khác: thêm `--offset <giờ UTC>`). Italy có giờ mùa hè — job
+sync tự chỉnh giờ theo múi `Europe/Rome`, không phải sửa tay.
 
 Đã có một page chạy tốt? Trên giao diện chính, màn **Kịch bản tự động** có ô
 **"Chép từ page khác…"** — đổ 12 tin của page đó vào để sửa lại cho page mới, bấm Lưu mới ghi.

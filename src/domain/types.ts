@@ -36,6 +36,8 @@ export interface Page {
     last_planned_at: Date | null;
     /** Lần quét nhanh gần nhất — lượt sau chỉ lấy hội thoại mới từ mốc này. */
     last_quick_synced_at: Date | null;
+    /** Múi giờ IANA cho thị trường có giờ mùa hè (vd Europe/Rome); NULL = offset cố định. */
+    timezone: string | null;
 }
 
 export interface Script {

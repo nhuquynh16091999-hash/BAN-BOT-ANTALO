@@ -11,7 +11,7 @@ code sai. Đổi nghiệp vụ thì sửa file này trước, rồi mới sửa 
 | 1 | Nền tảng | Xây tiếp trên v2 | Giữ kiến trúc v2: Postgres, hàng đợi chống trùng, job riêng biệt | — |
 | 2 | Nơi chạy | VPS thuê, 24/7 | pm2 trên VPS, xem `deploy/SERVER.md` | `ecosystem.config.cjs` |
 | 3 | Số page | Trên 20 | Job SEND gửi **song song nhiều page** thay vì lần lượt — page cuối danh sách không bị trễ mất khung giờ | `SEND_PAGE_CONCURRENCY=10` |
-| 4 | Thị trường | Vùng Vịnh · Đài Loan · Singapore | Thêm **Singapore (UTC+8)**, thêm từ từ chối tiếng Mã Lai | `src/config/markets.ts` |
+| 4 | Thị trường | Vùng Vịnh · Đài Loan · Singapore → **30/09: chạy cả 37 page** | Thêm Singapore, Philippines, Hồng Kông, Việt Nam (giờ cố định) và **Ý (tự đổi giờ mùa hè theo Europe/Rome)**; từ từ chối tiếng Mã Lai. 11 page chưa rõ nước chủ dự án tự gán sau | `src/config/markets.ts` |
 | 5 | Gửi cho ai | Khách chưa chốt đơn **lần này** | Khách mua từ lâu mà nay nhắn lại vẫn được chăm; chỉ dừng khi chốt đơn mới | `POS_CONVERT_MODE=increase` |
 | 6 | Biết khách đã chốt | Đơn POS · Tag · **Khách để lại SĐT** | Thêm luật SĐT: SĐT để lại **trong chuỗi này** → dừng chuỗi, huỷ lượt còn chờ | `CONVERT_ON_PHONE=true` |
 | 7 | Khách mới nhắn < 24h | **Gửi luôn** | Job SYNC **quét nhanh mỗi 15 phút** → khách vừa nhắn vào chuỗi ngay trong ngày, nhận tin ở khung giờ gần nhất | `SYNC_QUICK_ENABLED=true` |

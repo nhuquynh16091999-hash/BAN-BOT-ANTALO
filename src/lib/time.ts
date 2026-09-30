@@ -74,6 +74,21 @@ export function isWithinSendWindow(lastInteractionAt: Date, windowDays: number, 
     return at.getTime() - lastInteractionAt.getTime() < windowDays * DAY_MS;
 }
 
+/**
+ * Độ lệch UTC (giờ) của một múi giờ IANA tại thời điểm `at` — có tính giờ mùa hè.
+ * Ví dụ ('Europe/Rome', tháng 7) → 2, ('Europe/Rome', tháng 12) → 1.
+ * Chỉ dùng cho thị trường có giờ mùa hè; thị trường khác dùng offset cố định.
+ */
+export function currentUtcOffset(tz: string, at: Date = new Date()): number {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" })
+        .formatToParts(at)
+        .find((p) => p.type === "timeZoneName")?.value ?? "GMT";
+    const m = /^GMT([+-])(\d{1,2})(?::(\d{2}))?$/.exec(part);
+    if (!m) return 0; // "GMT" trơn = UTC+0
+    const hours = Number(m[2]) + Number(m[3] ?? 0) / 60;
+    return m[1] === "-" ? -hours : hours;
+}
+
 /** Cộng phút vào một mốc thời gian. */
 export function addMinutes(at: Date, minutes: number): Date {
     return new Date(at.getTime() + minutes * 60_000);

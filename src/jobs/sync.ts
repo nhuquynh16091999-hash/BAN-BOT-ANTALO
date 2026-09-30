@@ -179,6 +179,11 @@ if (isMain(import.meta.url)) {
     runJob("sync", async (args, log) => {
         const now = new Date();
 
+        // Thị trường có giờ mùa hè: chỉnh utc_offset trước khi tính "tới giờ chưa"
+        for (const c of await pagesRepo.syncDstOffsets(now)) {
+            log.info(c, `🕐 ${c.page_name} đổi giờ: UTC${c.from >= 0 ? "+" : ""}${c.from} → UTC${c.to >= 0 ? "+" : ""}${c.to}`);
+        }
+
         let work: Array<{ page: Page; mode: SyncMode }>;
         if (args.page) {
             const p = await pagesRepo.findByFbPageId(args.page);

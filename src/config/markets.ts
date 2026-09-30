@@ -4,6 +4,10 @@
  * Đây là bảng tra CỨNG, không đọc từ env: sai múi giờ nghĩa là bắn tin lúc
  * 3 giờ sáng cho khách hàng thật. Page nào thuộc thị trường lạ thì phải khai
  * utc_offset thủ công khi thêm page.
+ *
+ * Thị trường có giờ mùa hè (châu Âu…) khai thêm `tz` (tên múi giờ IANA). Khi đó
+ * utcOffset chỉ là giờ mùa đông; giờ thật của page được job sync tính lại theo
+ * `tz` mỗi lượt (xem pages.repo syncDstOffsets).
  */
 export interface Market {
     readonly key: string;
@@ -11,6 +15,7 @@ export interface Market {
     readonly city: string;
     readonly utcOffset: number;
     readonly flag: string;
+    readonly tz?: string;
 }
 
 export const MARKETS = {
@@ -23,6 +28,11 @@ export const MARKETS = {
     Japan:   { key: "Japan",   label: "Nhật Bản",     city: "Tokyo",      utcOffset: 9, flag: "🇯🇵" },
     Taiwan:  { key: "Taiwan",  label: "Đài Loan",     city: "Đài Bắc",    utcOffset: 8, flag: "🇹🇼" },
     Singapore: { key: "Singapore", label: "Singapore", city: "Singapore", utcOffset: 8, flag: "🇸🇬" },
+    Philippines: { key: "Philippines", label: "Philippines", city: "Manila", utcOffset: 8, flag: "🇵🇭" },
+    HongKong: { key: "HongKong", label: "Hồng Kông", city: "Hong Kong", utcOffset: 8, flag: "🇭🇰" },
+    Vietnam: { key: "Vietnam", label: "Việt Nam", city: "Hà Nội", utcOffset: 7, flag: "🇻🇳" },
+    // Ý đổi giờ mùa hè: +2 từ cuối tháng 3 tới cuối tháng 10, còn lại +1
+    Italy: { key: "Italy", label: "Ý", city: "Rome", utcOffset: 1, flag: "🇮🇹", tz: "Europe/Rome" },
 } as const satisfies Record<string, Market>;
 
 export type MarketKey = keyof typeof MARKETS;

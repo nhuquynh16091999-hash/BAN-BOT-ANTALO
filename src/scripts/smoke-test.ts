@@ -88,7 +88,7 @@ try {
     // ═══ 1. MIGRATION ═══════════════════════════════════════════════════════
     section("Migration");
     const applied = await migrate();
-    eq("Áp dụng đúng 5 file migration", applied, 5);
+    eq("Áp dụng đúng 6 file migration", applied, 6);
     const tables = await query<{ n: number }>(
         `SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
     );
@@ -867,6 +867,22 @@ try {
     eq("Có thị trường Singapore, UTC+8", utcOffsetOf("Singapore"), 8);
     check("Vẫn giữ Vùng Vịnh + Đài Loan", ["Saudi", "UAE", "Kuwait", "Oman", "Qatar", "Bahrain", "Taiwan"].every((k) => k in MARKETS));
     eq("Từ chối tiếng Mã Lai (Singapore)", matchOptOut("tolong berhenti hantar"), "berhenti");
+    eq("Thêm thị trường Philippines · Hồng Kông · Việt Nam · Ý",
+        [utcOffsetOf("Philippines"), utcOffsetOf("HongKong"), utcOffsetOf("Vietnam"), utcOffsetOf("Italy")], [8, 8, 7, 1]);
+    eq("⭐ Giờ mùa hè: Ý tháng 7 là UTC+2", time.currentUtcOffset("Europe/Rome", new Date("2026-07-15T12:00:00Z")), 2);
+    eq("…Ý tháng 12 là UTC+1", time.currentUtcOffset("Europe/Rome", new Date("2026-12-15T12:00:00Z")), 1);
+    eq("…ngay trước / sau lúc đổi giờ 25/10/2026 (01:00 UTC)",
+        [time.currentUtcOffset("Europe/Rome", new Date("2026-10-25T00:59:00Z")), time.currentUtcOffset("Europe/Rome", new Date("2026-10-25T01:01:00Z"))], [2, 1]);
+    eq("Múi giờ không đổi giờ vẫn đúng (Manila +8)", time.currentUtcOffset("Asia/Manila"), 8);
+
+    const itPage = await pagesRepo.upsert({ pageId: "SMOKE_IT", pageName: "Page Ý", market: "Italy", utcOffset: 1, timezone: "Europe/Rome" });
+    const winter = await pagesRepo.syncDstOffsets(new Date("2026-12-15T12:00:00Z"));
+    eq("Mùa đông: page Ý giữ +1, không đổi gì", winter.filter((c) => c.page_name === "Page Ý").length, 0);
+    const summer = await pagesRepo.syncDstOffsets(new Date("2026-07-15T12:00:00Z"));
+    eq("⭐ Sang mùa hè: job tự chỉnh page Ý từ +1 lên +2", summer.find((c) => c.page_name === "Page Ý"), { page_name: "Page Ý", from: 1, to: 2 });
+    eq("…và ghi vào database", (await pagesRepo.findById(itPage.id))?.utc_offset, 2);
+    eq("Page không có múi giờ mùa hè thì không bị đụng", (await pagesRepo.syncDstOffsets(new Date("2026-07-15T12:00:00Z"))).length, 0);
+    await query(`DELETE FROM pages WHERE page_id = 'SMOKE_IT'`);
     eq("Lỡ giờ dưới 2 tiếng vẫn gửi bù (120 phút)", config.send.lateWindowMin, 120);
     eq("Page mới gửi đủ tệp ngay (tắt khởi động dần)", config.rampUp.days, 0);
     eq("Khách để lại SĐT = đã chốt (bật mặc định)", config.convert.onPhone, true);

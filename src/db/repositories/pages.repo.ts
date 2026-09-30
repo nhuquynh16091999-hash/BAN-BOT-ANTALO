@@ -1,12 +1,13 @@
 import { query, queryOne } from "../pool.js";
 import type { Page } from "../../domain/types.js";
+import { currentUtcOffset } from "../../lib/time.js";
 
 /** Thao tác với bảng pages. */
 
 const COLS = `
     id, page_id, page_name, market, utc_offset, pancake_shop_id, is_active,
     health_state, paused_until, pause_reason, pause_count_24h,
-    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at
+    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at, timezone
 `;
 
 export function listAll(): Promise<Page[]> {
@@ -31,20 +32,23 @@ export interface CreatePageInput {
     market: string;
     utcOffset: number;
     pancakeShopId?: string | null;
+    /** Múi giờ IANA nếu thị trường có giờ mùa hè — job sync tự chỉnh utc_offset theo nó */
+    timezone?: string | null;
 }
 
 /** Thêm page; nếu page_id đã có thì cập nhật tên/thị trường/múi giờ. */
 export async function upsert(input: CreatePageInput): Promise<Page> {
     const row = await queryOne<Page>(
-        `INSERT INTO pages (page_id, page_name, market, utc_offset, pancake_shop_id)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO pages (page_id, page_name, market, utc_offset, pancake_shop_id, timezone)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (page_id) DO UPDATE SET
              page_name       = EXCLUDED.page_name,
              market          = EXCLUDED.market,
              utc_offset      = EXCLUDED.utc_offset,
-             pancake_shop_id = COALESCE(EXCLUDED.pancake_shop_id, pages.pancake_shop_id)
+             pancake_shop_id = COALESCE(EXCLUDED.pancake_shop_id, pages.pancake_shop_id),
+             timezone        = EXCLUDED.timezone
          RETURNING ${COLS}`,
-        [input.pageId, input.pageName, input.market, input.utcOffset, input.pancakeShopId ?? null]
+        [input.pageId, input.pageName, input.market, input.utcOffset, input.pancakeShopId ?? null, input.timezone ?? null]
     );
     if (!row) throw new Error("Upsert page không trả về dòng nào");
     return row;
@@ -85,6 +89,31 @@ export async function markPlanned(id: number): Promise<void> {
 
 export async function setRampPercent(id: number, percent: number): Promise<void> {
     await query(`UPDATE pages SET ramp_percent = $2 WHERE id = $1`, [id, Math.max(0, Math.min(100, percent))]);
+}
+
+/**
+ * Page thuộc thị trường có giờ mùa hè: tính lại utc_offset theo múi giờ IANA.
+ * Mọi job khác chỉ đọc utc_offset, nên chỉnh ở đây một chỗ là đủ. Trả về các
+ * page vừa đổi giờ (để ghi log).
+ */
+export async function syncDstOffsets(at: Date = new Date()): Promise<Array<{ page_name: string; from: number; to: number }>> {
+    const rows = await query<{ id: number; page_name: string; utc_offset: number; timezone: string }>(
+        `SELECT id, page_name, utc_offset, timezone FROM pages WHERE timezone IS NOT NULL`
+    );
+    const changed: Array<{ page_name: string; from: number; to: number }> = [];
+    for (const r of rows) {
+        let now: number;
+        try {
+            now = currentUtcOffset(r.timezone, at);
+        } catch {
+            continue; // tên múi giờ sai — giữ offset cũ, không đoán
+        }
+        if (now !== r.utc_offset) {
+            await query(`UPDATE pages SET utc_offset = $2 WHERE id = $1`, [r.id, now]);
+            changed.push({ page_name: r.page_name, from: r.utc_offset, to: now });
+        }
+    }
+    return changed;
 }
 
 // ─── Sức khoẻ page ────────────────────────────────────────────────────────────
