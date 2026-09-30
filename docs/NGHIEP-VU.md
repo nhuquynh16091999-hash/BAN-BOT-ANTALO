@@ -29,6 +29,17 @@ code sai. Đổi nghiệp vụ thì sửa file này trước, rồi mới sửa 
 | 19 | Gửi tay | Cần | Màn **Bắn tay**: soạn 1 tin, chọn khách, gửi — vẫn đi qua cầu dao page, hãm tốc và nhật ký từng tin; tự bỏ khách đã chốt/từ chối | — |
 | 20 | Ưu tiên số 1 | **Ra nhiều đơn nhất** | Mặc định chọn theo hướng gửi nhiều hơn (đủ tệp ngay, gửi bù 2 tiếng, khách mới vào ngay); báo cáo "tin nào ra đơn" để tối ưu nội dung | — |
 
+### Chốt thêm ngày 30/09/2026 (sau khi xem số liệu thật)
+
+- **Tag mua hàng dừng chuỗi VĨNH VIỄN**, kể cả tag có từ đơn cũ ("Đã gửi", "Mua hàng",
+  "đã nhận hàng"…). Chủ dự án chọn không bắn tiếp cho người đã mua, dù khác với câu 5
+  (POS vẫn dùng mốc chuẩn — chỉ dừng khi có đơn mới). Ảnh hưởng lúc chốt: ~113 khách
+  trong cửa sổ 7 ngày không được gửi.
+- **SĐT trùng ở nhiều khách** (nghi số của shop/nhân viên) vẫn tính là khách để lại SĐT.
+- Khoảng 77% khách không gửi được vì **đã quá 7 ngày không nhắn** — giới hạn của
+  Facebook, không lách bằng tag khác mục đích (dễ bị khoá page). Muốn tăng số khách
+  gửi được thì phải kéo khách nhắn lại page; khách nhắn lại tự vào chuỗi trong ≤ 15 phút.
+
 ## Luồng một ngày của một page
 
 ```
