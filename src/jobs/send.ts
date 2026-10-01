@@ -294,8 +294,9 @@ export async function runPass(log: Logger, opts: { pageId?: string | null } = {}
 
     const pages = opts.pageId
         ? [await pagesRepo.findByFbPageId(opts.pageId)].filter((p): p is Page => p !== null)
-        : await pagesRepo.listActive();
-    const sendable = pages.filter((p) => pagesRepo.isSendable(p));
+        : await pagesRepo.listWithPendingSends();
+    // Page tắt chỉ được ghé để gửi lượt bắn tay (pickBatch tự lọc đúng loại lượt)
+    const sendable = pages.filter((p) => pagesRepo.isSendable(p, new Date(), { manualOnly: !p.is_active }));
 
     // Nhiều page gửi SONG SONG (tối đa SEND_PAGE_CONCURRENCY page cùng lúc).
     // Nhịp gửi của từng page (lô, nghỉ giữa lô, hãm tốc) giữ nguyên — Facebook

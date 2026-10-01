@@ -56,7 +56,9 @@ export function pickBatch(limit: number, workerId: string, pageDbId?: number): P
               JOIN customers c ON c.id = q.customer_id
              WHERE q.state = 'queued'
                AND q.scheduled_at <= now()
-               AND p.is_active
+               -- Page TẮT vẫn gửi lượt BẮN TAY (người dùng chủ động bấm, vd gửi thử cho
+               -- chính mình); chuỗi tự động thì chỉ chạy khi page bật
+               AND (p.is_active OR q.manual)
                AND (p.health_state <> 'paused' OR (p.paused_until IS NOT NULL AND p.paused_until < now()))
                AND c.status = 'active'
                AND ($3::bigint IS NULL OR q.page_id = $3)

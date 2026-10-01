@@ -859,6 +859,18 @@ try {
     eq("Danh sách khách rỗng → không ghi gì",
         await queueRepo.enqueueManual({ pageDbId: mPage.id, customerIds: [], body: "x", media: [] }), 0);
 
+    // Page TẮT: bắn tay vẫn đi (gửi thử cho chính mình mà không bật chuỗi cho cả page)
+    await query(`UPDATE send_queue SET state = 'skipped' WHERE page_id = $1 AND state IN ('queued', 'sending')`, [mPage.id]);
+    await pagesRepo.setActive(mPage.id, false, 100);
+    await planPage((await pagesRepo.findById(mPage.id))!, log); // chuỗi tự động KHÔNG được xếp khi page tắt?
+    await query(`UPDATE send_queue SET state = 'queued', scheduled_at = now() - interval '1 minute' WHERE page_id = $1 AND NOT manual AND state = 'skipped' AND id = (SELECT min(id) FROM send_queue WHERE page_id = $1 AND NOT manual)`, [mPage.id]);
+    await queueRepo.enqueueManual({ pageDbId: mPage.id, customerIds: [m1.id], body: "Gửi thử cho chính mình", media: [] });
+    check("⭐ Page tắt có lượt bắn tay đang chờ → job gửi vẫn ghé page đó",
+        (await pagesRepo.listWithPendingSends()).some((p) => p.id === mPage.id));
+    const offPicked = await queueRepo.pickBatch(20, "w-off", mPage.id);
+    check("⭐ Page tắt: lấy được lượt bắn tay", offPicked.some((j) => j.manual && j.body === "Gửi thử cho chính mình"));
+    check("⭐ …nhưng KHÔNG lấy lượt của chuỗi tự động", offPicked.every((j) => j.manual));
+
     await query(`DELETE FROM pages WHERE page_id = 'SMOKE_MANUAL'`);
 
     // ═══ NGHIỆP VỤ CHỐT 29/09/2026 (docs/NGHIEP-VU.md) ═══════════════════════

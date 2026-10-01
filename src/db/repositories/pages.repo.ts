@@ -14,6 +14,16 @@ export function listAll(): Promise<Page[]> {
     return query<Page>(`SELECT ${COLS} FROM pages ORDER BY market, page_name`);
 }
 
+/** Page cần job SEND ghé: page đang bật, hoặc page tắt nhưng có lượt BẮN TAY đang chờ. */
+export function listWithPendingSends(): Promise<Page[]> {
+    return query<Page>(
+        `SELECT ${COLS} FROM pages p
+          WHERE p.is_active
+             OR EXISTS (SELECT 1 FROM send_queue q WHERE q.page_id = p.id AND q.manual AND q.state = 'queued')
+          ORDER BY market, page_name`
+    );
+}
+
 export function listActive(): Promise<Page[]> {
     return query<Page>(`SELECT ${COLS} FROM pages WHERE is_active ORDER BY market, page_name`);
 }
@@ -162,8 +172,8 @@ export async function resetPauseCounters(): Promise<void> {
 }
 
 /** Page hiện có được gửi không (đang bật và không bị ngưng)? */
-export function isSendable(p: Page, now: Date = new Date()): boolean {
-    if (!p.is_active) return false;
+export function isSendable(p: Page, now: Date = new Date(), opts: { manualOnly?: boolean } = {}): boolean {
+    if (!p.is_active && !opts.manualOnly) return false;
     if (p.health_state !== "paused") return true;
     return p.paused_until !== null && p.paused_until.getTime() < now.getTime();
 }
