@@ -38,9 +38,6 @@ export interface Page {
     last_quick_synced_at: Date | null;
     /** Múi giờ IANA cho thị trường có giờ mùa hè (vd Europe/Rome); NULL = offset cố định. */
     timezone: string | null;
-    /** Giờ tối đa từ tin cuối của khách mà page còn gửi được; NULL = mặc định SEND_WINDOW_DAYS */
-    send_window_hours: number | null;
-    window_narrowed_at: Date | null;
 }
 
 export interface Script {
@@ -118,8 +115,6 @@ export interface SendableJob extends QueueJob {
     last_interaction_at: Date;
     fb_page_id: string;
     page_name: string;
-    /** Cửa sổ gửi riêng của page (đã đo); NULL = mặc định */
-    send_window_hours: number | null;
     body: string;
     media: string[];
 }

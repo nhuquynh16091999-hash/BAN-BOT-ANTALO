@@ -75,7 +75,7 @@ export function pickBatch(limit: number, workerId: string, pageDbId?: number): P
                 u.scheduled_at, u.state, u.attempt_count,
                 u.manual,
                 c.psid, c.conversation_id, c.name AS customer_name, c.last_interaction_at,
-                p.page_id AS fb_page_id, p.page_name, p.send_window_hours,
+                p.page_id AS fb_page_id, p.page_name,
                 -- Lượt bắn tay mang nội dung riêng; lượt theo lịch lấy từ kịch bản
                 COALESCE(NULLIF(btrim(u.override_body), ''), m.body, '') AS body,
                 CASE WHEN COALESCE(array_length(u.override_media, 1), 0) > 0
@@ -170,21 +170,12 @@ export async function countQueuedToday(pageDbId: number, dayStartUtc: Date, dayE
 
 // ─── Nhật ký ──────────────────────────────────────────────────────────────────
 
-export async function writeLog(
-    job: QueueJob & { last_interaction_at?: Date },
-    outcome: SendOutcome,
-    at: Date = new Date()
-): Promise<void> {
-    // Tin gửi lúc khách đã nhắn được bao nhiêu giờ — để đo page nào gửi được sau 24h
-    const hoursSince = job.last_interaction_at
-        ? Math.max(0, Math.round(((at.getTime() - job.last_interaction_at.getTime()) / 3_600_000) * 10) / 10)
-        : null;
+export async function writeLog(job: QueueJob, outcome: SendOutcome): Promise<void> {
     await query(
         `INSERT INTO send_log
             (queue_id, customer_id, page_id, script_message_id, journey_day, slot_index,
-             channel, fb_tag, success, error_kind, error_code, error_message, duration_ms,
-             hours_since_interaction)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+             channel, fb_tag, success, error_kind, error_code, error_message, duration_ms)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [
             job.id,
             job.customer_id,
@@ -199,7 +190,6 @@ export async function writeLog(
             outcome.errorCode ?? null,
             outcome.errorMessage ? outcome.errorMessage.slice(0, 500) : null,
             outcome.durationMs,
-            hoursSince === null ? null : Math.min(hoursSince, 99999), // NUMERIC(6,1)
         ]
     );
 }

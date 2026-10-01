@@ -165,11 +165,9 @@ export async function processJob(job: SendableJob, ctx: PageContext): Promise<Jo
         await queueRepo.markSkipped(job.id, "Nội dung rỗng");
         return none;
     }
-    // Kiểm tra cửa sổ lần cuối ngay trước khi gửi — khách có thể vừa rơi ra sau khi PLAN chạy.
-    // Dùng cửa sổ RIÊNG của page (đã đo) — page chỉ gửi được trong 24h thì không phí lượt.
-    const windowHours = pagesRepo.windowHoursOf(job, config.journey.windowDays);
-    if (!isWithinSendWindow(job.last_interaction_at, windowHours / 24)) {
-        await queueRepo.markSkipped(job.id, `Ngoài cửa sổ ${windowHours} giờ của page lúc gửi`);
+    // Kiểm tra cửa sổ lần cuối ngay trước khi gửi — khách có thể vừa rơi ra sau khi PLAN chạy
+    if (!isWithinSendWindow(job.last_interaction_at, config.journey.windowDays)) {
+        await queueRepo.markSkipped(job.id, `Ngoài cửa sổ ${config.journey.windowDays} ngày lúc gửi`);
         return none;
     }
 

@@ -7,8 +7,7 @@ import { currentUtcOffset } from "../../lib/time.js";
 const COLS = `
     id, page_id, page_name, market, utc_offset, pancake_shop_id, is_active,
     health_state, paused_until, pause_reason, pause_count_24h,
-    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at, timezone,
-    send_window_hours, window_narrowed_at
+    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at, timezone
 `;
 
 export function listAll(): Promise<Page[]> {
@@ -115,21 +114,6 @@ export async function syncDstOffsets(at: Date = new Date()): Promise<Array<{ pag
         }
     }
     return changed;
-}
-
-/** Page gửi muộn toàn lỗi → chỉ gửi trong `hours` giờ kể từ tin cuối của khách. */
-export async function narrowWindow(id: number, hours: number): Promise<void> {
-    await query(`UPDATE pages SET send_window_hours = $2, window_narrowed_at = now() WHERE id = $1`, [id, hours]);
-}
-
-/** Mở lại cửa sổ mặc định để đo lần nữa. */
-export async function resetWindow(id: number): Promise<void> {
-    await query(`UPDATE pages SET send_window_hours = NULL, window_narrowed_at = NULL WHERE id = $1`, [id]);
-}
-
-/** Cửa sổ gửi hiệu lực của page, tính bằng giờ. */
-export function windowHoursOf(p: Pick<Page, "send_window_hours">, defaultDays: number): number {
-    return p.send_window_hours ?? defaultDays * 24;
 }
 
 // ─── Sức khoẻ page ────────────────────────────────────────────────────────────
