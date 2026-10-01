@@ -194,15 +194,19 @@ if (isMain(import.meta.url)) {
             }
             work = [{ page: p, mode: "full" }]; // chỉ định page cụ thể = luôn quét đầy đủ, bất kể giờ
         } else {
-            const active = await pagesRepo.listActive();
-            work = active
+            // Page bật + page TẮT đã từng quét được: page tắt vẫn cần tệp khách mới
+            // để bắn tay (vd gửi thử cho chính mình). Page tắt chưa quét lần nào
+            // thường là page hết gói Pancake — bỏ qua, không thì mỗi 15 phút lại
+            // ghi một dòng lỗi. Page tắt chỉ được quét, KHÔNG xếp lịch gửi.
+            const candidates = (await pagesRepo.listAll()).filter((p) => p.is_active || p.last_synced_at !== null);
+            work = candidates
                 .map((page) => ({
                     page,
                     mode: (args.force || isDueForSync(page, now) ? "full" : "quick") as SyncMode,
                 }))
                 .filter((w) => w.mode === "full" || config.sync.quickEnabled);
             if (work.length === 0) {
-                log.info({ activePages: active.length }, "Không có page nào cần đồng bộ");
+                log.info({ pages: candidates.length }, "Không có page nào cần đồng bộ");
                 return;
             }
         }
