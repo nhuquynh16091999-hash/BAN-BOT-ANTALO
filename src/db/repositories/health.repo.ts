@@ -54,6 +54,28 @@ export async function insertSnapshot(
     );
 }
 
+// ─── Cửa sổ gửi ───────────────────────────────────────────────────────────────
+
+/**
+ * Tin gửi MUỘN (khách nhắn đã quá 24h) của page trong `days` ngày gần nhất.
+ * Chỉ tính tin nói lên được chuyện cửa sổ: đi được, hoặc lỗi ngoài cửa sổ / lỗi
+ * không rõ. Lỗi cấp page (hết gói, bị chặn), mạng, token, khách chặn page thì
+ * bỏ — chúng không phải do gửi muộn.
+ */
+export async function lateSendStats(pageDbId: number, days: number): Promise<{ late: number; lateOk: number }> {
+    const row = await queryOne<{ late: number; late_ok: number }>(
+        `SELECT COUNT(*)::int                       AS late,
+                COUNT(*) FILTER (WHERE success)::int AS late_ok
+           FROM send_log
+          WHERE page_id = $1
+            AND sent_at > now() - make_interval(days => $2)
+            AND hours_since_interaction > 24
+            AND (success OR error_kind IN ('OUT_OF_WINDOW', 'UNKNOWN'))`,
+        [pageDbId, days]
+    );
+    return { late: row?.late ?? 0, lateOk: row?.late_ok ?? 0 };
+}
+
 // ─── Lượt chạy job ────────────────────────────────────────────────────────────
 
 export async function startJobRun(job: string, pageDbId?: number): Promise<number> {

@@ -74,9 +74,11 @@ export async function planPage(page: Page, log: Logger, opts: { dryRun?: boolean
 
     // Chọn tập con XÁC ĐỊNH theo id để cùng những khách đó được tiếp tục hôm sau,
     // không phải mỗi ngày một nhóm ngẫu nhiên khác
+    // Cửa sổ của RIÊNG page này: page đã đo thấy gửi sau 24h toàn lỗi thì chỉ còn 24h
+    const windowDays = pagesRepo.windowHoursOf(page, config.journey.windowDays) / 24;
     const eligible = all.filter((c) => {
         if (stats.rampPercent < 100 && c.id % 100 >= stats.rampPercent) return false;
-        if (!isWithinSendWindow(c.last_interaction_at, config.journey.windowDays, now)) {
+        if (!isWithinSendWindow(c.last_interaction_at, windowDays, now)) {
             stats.skippedOutOfWindow++;
             return false;
         }

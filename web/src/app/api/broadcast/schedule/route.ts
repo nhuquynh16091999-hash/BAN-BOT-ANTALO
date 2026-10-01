@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
         const rows = await query<Row>(
             `SELECT p.id AS page_id, p.page_id AS fb_page_id, p.page_name, p.market,
                     p.is_active, p.health_state, p.ramp_percent, p.last_synced_at,
-                    (SELECT COUNT(*)::int FROM customers c WHERE c.page_id = p.id AND c.status = 'active') AS active_customers,
+                    (SELECT COUNT(*)::int FROM customers c WHERE c.page_id = p.id AND c.status = 'active' AND c.last_interaction_at > now() - make_interval(hours => COALESCE(p.send_window_hours, 168))) AS active_customers,
                     s.id AS script_id, s.name AS script_name
                FROM pages p
                LEFT JOIN scripts s ON s.page_id = p.id AND s.is_active

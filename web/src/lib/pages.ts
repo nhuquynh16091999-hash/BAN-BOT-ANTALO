@@ -26,9 +26,11 @@ export function listPages(): Promise<PageRow[]> {
                 EXISTS (SELECT 1 FROM scripts s WHERE s.page_id = p.id AND s.is_active) AS has_script
            FROM pages p
            LEFT JOIN LATERAL (
-                SELECT COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+                -- "gửi được" = đang trong chuỗi VÀ còn trong cửa sổ gửi thật của page
+                -- (page đã đo thấy gửi sau 24h toàn lỗi thì chỉ tính khách nhắn trong 24h)
+                SELECT COUNT(*) FILTER (WHERE c.status = 'active' AND c.last_interaction_at > now() - make_interval(hours => COALESCE(p.send_window_hours, 168)))::int AS active,
                        COUNT(*)::int AS total
-                  FROM customers WHERE page_id = p.id
+                  FROM customers c WHERE c.page_id = p.id
            ) c ON TRUE
           ORDER BY p.is_active DESC, p.page_name`
     );

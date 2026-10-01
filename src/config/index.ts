@@ -86,6 +86,17 @@ const schema = z.object({
     HEALTH_ESCALATE_HOURS: int(6),
     HEALTH_MIN_SAMPLE: int(20),
 
+    // ─── Tự đo cửa sổ gửi từng page ─────────────────────────────────────
+    // Gửi sau 24h phụ thuộc tag Human Agent — page được page không. Health đếm
+    // tin gửi muộn (>24h) trong LOOKBACK ngày; đủ MIN_SAMPLE tin mà tỉ lệ đi
+    // ≤ MAX_SUCCESS_RATE → page đó chỉ gửi trong NARROW_HOURS giờ, RETRY_DAYS
+    // ngày sau mở lại để thử.
+    WINDOW_ADAPT_LOOKBACK_DAYS: int(3),
+    WINDOW_ADAPT_MIN_SAMPLE: int(30),
+    WINDOW_ADAPT_MAX_SUCCESS_RATE: num(0.2).pipe(z.number().min(0).max(1)),
+    WINDOW_ADAPT_NARROW_HOURS: int(24).pipe(z.number().min(1).max(168)),
+    WINDOW_ADAPT_RETRY_DAYS: int(7),
+
     // ─── Khởi động dần ───────────────────────────────────────────────────
     // Nghiệp vụ 29/09: page mới gửi đủ tệp ngay (0 = tắt khởi động dần).
     // Muốn bật lại: RAMP_UP_DAYS=3, RAMP_UP_START_PERCENT=25.
@@ -187,6 +198,14 @@ export const config = {
         escalateAfterPauses: env.HEALTH_ESCALATE_AFTER_PAUSES,
         escalateHours: env.HEALTH_ESCALATE_HOURS,
         minSample: env.HEALTH_MIN_SAMPLE,
+    },
+
+    windowAdapt: {
+        lookbackDays: env.WINDOW_ADAPT_LOOKBACK_DAYS,
+        minSample: env.WINDOW_ADAPT_MIN_SAMPLE,
+        maxSuccessRate: env.WINDOW_ADAPT_MAX_SUCCESS_RATE,
+        narrowHours: env.WINDOW_ADAPT_NARROW_HOURS,
+        retryDays: env.WINDOW_ADAPT_RETRY_DAYS,
     },
 
     rampUp: {

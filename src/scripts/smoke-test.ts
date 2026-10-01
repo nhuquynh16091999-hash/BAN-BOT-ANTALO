@@ -88,7 +88,7 @@ try {
     // ═══ 1. MIGRATION ═══════════════════════════════════════════════════════
     section("Migration");
     const applied = await migrate();
-    eq("Áp dụng đúng 6 file migration", applied, 6);
+    eq("Áp dụng đúng 7 file migration", applied, 7);
     const tables = await query<{ n: number }>(
         `SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
     );
@@ -973,6 +973,65 @@ try {
     check("Hết giờ / pm2 báo dừng → không nhận page mới", started >= 5 && started < 10, `đã bắt đầu ${started}`);
 
     await query(`DELETE FROM pages WHERE page_id IN ('SMOKE_PHONE', 'SMOKE_NOON')`);
+
+    section("Cửa sổ gửi từng page — đo thật, tự thu hẹp");
+    const { decideWindow } = await import("../domain/window.js");
+    const rules = { minSample: 30, maxSuccessRate: 0.2, narrowHours: 24, retryDays: 7 };
+    const open7 = { sendWindowHours: null, narrowedAt: null };
+    eq("Chưa đủ 30 tin gửi muộn → chưa kết luận", decideWindow(open7, { late: 12, lateOk: 0 }, rules, now), null);
+    eq("⭐ Gửi sau 24h chỉ đi 5% → thu về 24 giờ", decideWindow(open7, { late: 40, lateOk: 2 }, rules, now)?.action, "narrow");
+    eq("Gửi sau 24h vẫn đi 50% → giữ 7 ngày", decideWindow(open7, { late: 40, lateOk: 20 }, rules, now), null);
+    eq("Thu hẹp mới 2 ngày → giữ nguyên",
+        decideWindow({ sendWindowHours: 24, narrowedAt: new Date(now.getTime() - 2 * DAY) }, { late: 0, lateOk: 0 }, rules, now), null);
+    eq("⭐ Thu hẹp đủ 7 ngày → mở lại để đo lần nữa",
+        decideWindow({ sendWindowHours: 24, narrowedAt: new Date(now.getTime() - 8 * DAY) }, { late: 0, lateOk: 0 }, rules, now)?.action, "retry");
+
+    const winPage = await pagesRepo.upsert({ pageId: "SMOKE_WIN", pageName: "Page cửa sổ", market: "Test", utcOffset: noonOffset });
+    await pagesRepo.setActive(winPage.id, true, 100);
+    await scriptsRepo.replaceActiveScript(winPage.id, "Cửa sổ", messages, { journeyDays: 7, slotsPerDay: 4 });
+    const mkw = (psid: string, hoursAgo: number) => ({
+        psid, conversationId: `SMOKE_WIN_${psid}`, name: `Khách ${psid}`, phone: null, orderCount: 0, tags: [],
+        lastInteractionAt: new Date(now.getTime() - hoursAgo * 3_600_000),
+    });
+    await customersRepo.upsertBatch(winPage.id, [mkw("W10H", 10), mkw("W3D", 72)]);
+    const wCust = (await customersRepo.findByPsid(winPage.id, "W3D"))!;
+
+    // Nhật ký ghi tin gửi lúc khách đã nhắn được bao nhiêu giờ
+    await queueRepo.enqueueManual({ pageDbId: winPage.id, customerIds: [wCust.id], body: "thử cửa sổ", media: [] });
+    const wQueueId = (await queryOne<{ id: number }>(`SELECT id FROM send_queue WHERE customer_id = $1`, [wCust.id]))!.id;
+    await queueRepo.writeLog(
+        { id: wQueueId, customer_id: wCust.id, page_id: winPage.id, script_message_id: null, journey_day: 1, slot_index: 0,
+          scheduled_at: now, state: "sending", attempt_count: 1, last_interaction_at: new Date(now.getTime() - 30 * 3_600_000) },
+        { success: false, channel: "pancake", errorKind: "OUT_OF_WINDOW", errorCode: "10", durationMs: 50 }, now);
+    eq("⭐ Nhật ký ghi số giờ từ tin cuối của khách (30 giờ)",
+        (await queryOne<{ h: string }>(`SELECT hours_since_interaction::text AS h FROM send_log WHERE page_id = $1`, [winPage.id]))?.h, "30.0");
+
+    // 35 tin gửi muộn: 1 đi, 34 lỗi ngoài cửa sổ; thêm 5 lỗi chặn page (không được tính)
+    await query(
+        `INSERT INTO send_log (customer_id, page_id, channel, success, error_kind, hours_since_interaction, sent_at)
+         SELECT $1, $2, 'pancake', g = 1, CASE WHEN g = 1 THEN NULL ELSE 'OUT_OF_WINDOW' END, 50, now() - interval '1 hour'
+           FROM generate_series(1, 34) g`, [wCust.id, winPage.id]);
+    await query(
+        `INSERT INTO send_log (customer_id, page_id, channel, success, error_kind, hours_since_interaction, sent_at)
+         SELECT $1, $2, 'pancake', FALSE, 'PAGE_BLOCKED', 50, now() FROM generate_series(1, 5)`, [wCust.id, winPage.id]);
+    eq("Đếm tin gửi muộn: 35 tin, 1 đi — bỏ qua lỗi chặn page",
+        await healthRepo.lateSendStats(winPage.id, 3), { late: 35, lateOk: 1 });
+
+    const wDec = decideWindow(open7, await healthRepo.lateSendStats(winPage.id, 3), rules, now);
+    if (wDec?.action === "narrow") await pagesRepo.narrowWindow(winPage.id, wDec.hours);
+    const narrowed = (await pagesRepo.findById(winPage.id))!;
+    eq("⭐ Page bị thu về 24 giờ", narrowed.send_window_hours, 24);
+
+    const wPlan = await planPage(narrowed, log, { dryRun: true });
+    eq("⭐ Sau khi thu hẹp: khách nhắn 3 ngày trước không được xếp lịch nữa", [wPlan.eligible, wPlan.skippedOutOfWindow], [1, 1]);
+
+    const webPages = await import(pathToFileURL(resolve("web/src/lib/pages.ts")).href);
+    const wRow = (await webPages.listPages()).find((r: { page_id: string }) => r.page_id === "SMOKE_WIN");
+    eq("Giao diện: 'gửi được' chỉ đếm khách trong cửa sổ thật của page", [wRow?.active_customers, wRow?.total_customers], [1, 2]);
+
+    await pagesRepo.resetWindow(winPage.id);
+    eq("Mở lại → về cửa sổ mặc định 7 ngày", (await pagesRepo.findById(winPage.id))?.send_window_hours, null);
+    await query(`DELETE FROM pages WHERE page_id = 'SMOKE_WIN'`);
 
     await webDb.pool.end();
     await closePool();

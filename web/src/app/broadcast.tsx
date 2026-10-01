@@ -1656,6 +1656,102 @@ function CustomerCard({ d, onClose }: { d: CustDetail; onClose: () => void }) {
     );
 }
 
+// ─── Cửa sổ gửi từng page (hiện trong màn Theo dõi) ───────────────────────────
+// Facebook chắc chắn cho chủ động nhắn trong 24h sau tin cuối của khách; sau đó
+// phụ thuộc tag Human Agent nên page được page không. Hệ thống đo, và page nào
+// gửi muộn toàn lỗi thì tự thu về chỉ gửi trong 24h.
+
+interface WindowRow {
+    page_id: string;
+    page_name: string;
+    is_active: boolean;
+    send_window_hours: number | null;
+    window_narrowed_at: string | null;
+    n1: number; ok1: number;
+    n2: number; ok2: number;
+    n3: number; ok3: number;
+}
+
+function RateCell({ ok, n }: { ok: number; n: number }) {
+    if (n === 0) return <td className="num text-right" style={{ color: "var(--ink-3)" }}>—</td>;
+    const r = ok / n;
+    const tone = r >= 0.6 ? "var(--ok)" : r >= 0.2 ? "var(--warn)" : "var(--bad)";
+    return (
+        <td className="num text-right">
+            <b style={{ color: tone }}>{pct(r)}</b>
+            <span style={{ color: "var(--ink-3)" }}> · {num(ok)}/{num(n)}</span>
+        </td>
+    );
+}
+
+function WindowPanel() {
+    const [rows, setRows] = useState<WindowRow[] | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+        const load = () =>
+            getJson<{ pages: WindowRow[] }>("/api/window")
+                .then((d) => alive && setRows(d.pages))
+                .catch(() => { /* vòng tự cập nhật — không báo lỗi liên tục */ });
+        void load();
+        const id = setInterval(load, 60_000);
+        return () => {
+            alive = false;
+            clearInterval(id);
+        };
+    }, []);
+
+    return (
+        <div className="panel overflow-hidden">
+            <PanelHead
+                title="Gửi được theo thời gian từ lúc khách nhắn"
+                hint="7 ngày gần nhất. Facebook chắc chắn cho gửi trong 24 giờ; sau đó tuỳ page. Page gửi muộn toàn lỗi → hệ thống tự chỉ gửi trong 24 giờ, 7 ngày sau thử lại."
+            />
+            {!rows ? (
+                <Empty title="Đang tải…" />
+            ) : rows.length === 0 ? (
+                <Empty title="Chưa có page nào đang chạy" hint="Bật chiến dịch cho một page là bảng này bắt đầu có số." />
+            ) : (
+                <div className="overflow-x-auto">
+                    <table className="tbl min-w-[820px]">
+                        <thead>
+                            <tr>
+                                <th>Page</th>
+                                <th className="text-right">Khách nhắn &lt; 24 giờ</th>
+                                <th className="text-right">1–3 ngày</th>
+                                <th className="text-right">3–7 ngày</th>
+                                <th>Đang gửi cho</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((r) => (
+                                <tr key={r.page_id}>
+                                    <td className="font-semibold">{r.page_name}</td>
+                                    <RateCell ok={r.ok1} n={r.n1} />
+                                    <RateCell ok={r.ok2} n={r.n2} />
+                                    <RateCell ok={r.ok3} n={r.n3} />
+                                    <td>
+                                        {r.send_window_hours !== null ? (
+                                            <>
+                                                <Chip kind="warn">chỉ khách nhắn &lt; {r.send_window_hours} giờ</Chip>
+                                                <div className="mt-0.5 text-[11.5px]" style={{ color: "var(--ink-3)" }}>
+                                                    tự thu hẹp {dt(r.window_narrowed_at)} · gửi muộn toàn lỗi
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <Chip kind="ok">khách nhắn trong 7 ngày</Chip>
+                                        )}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Nhật ký job (hiện trong màn Theo dõi) ────────────────────────────────────
 
 const TEN_JOB: Record<string, string> = {
@@ -2276,7 +2372,8 @@ export default function App() {
                     />
                 )}
                 {screen === "theo-doi" && (
-                    <div className="mt-5">
+                    <div className="mt-5 space-y-5">
+                        <WindowPanel />
                         <JobsPanel />
                     </div>
                 )}

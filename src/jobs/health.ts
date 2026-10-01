@@ -3,6 +3,7 @@ import { floorToMinutes } from "../lib/time.js";
 import { runJob, withJobRun } from "../lib/runner.js";
 import * as pagesRepo from "../db/repositories/pages.repo.js";
 import * as healthRepo from "../db/repositories/health.repo.js";
+import { decideWindow } from "../domain/window.js";
 
 /**
  * JOB HEALTH — tầng bảo vệ cho mức 4 tin/ngày. Cron mỗi 15 phút.
@@ -23,11 +24,12 @@ interface HealthStats extends Record<string, unknown> {
     degraded: number;
     recovered: number;
     released: number;
+    narrowed: number;
 }
 
 runJob("health", async (args, log) => {
     await withJobRun("health", undefined, log, async () => {
-        const stats: HealthStats = { pages: 0, paused: 0, degraded: 0, recovered: 0, released: 0 };
+        const stats: HealthStats = { pages: 0, paused: 0, degraded: 0, recovered: 0, released: 0, narrowed: 0 };
         const now = new Date();
         const windowStart = floorToMinutes(now, 15);
 
@@ -75,6 +77,24 @@ runJob("health", async (args, log) => {
                 plog.info({ ...s }, `🟢 Hồi phục — tỉ lệ lỗi ${(s.errorRate * 100).toFixed(0)}%`);
             } else if (!args.dryRun) {
                 plog.debug({ ...s, state: page.health_state }, "ổn");
+            }
+
+            // Cửa sổ gửi: page gửi sau 24h toàn lỗi → chỉ gửi trong 24h; đủ lâu thì mở lại để đo
+            const w = decideWindow(
+                { sendWindowHours: page.send_window_hours, narrowedAt: page.window_narrowed_at },
+                await healthRepo.lateSendStats(page.id, config.windowAdapt.lookbackDays),
+                config.windowAdapt,
+                now
+            );
+            if (w?.action === "narrow") {
+                await pagesRepo.narrowWindow(page.id, w.hours);
+                action ??= "narrow_window";
+                stats.narrowed++;
+                plog.warn(`⏳ ${w.reason}`);
+            } else if (w?.action === "retry") {
+                await pagesRepo.resetWindow(page.id);
+                action ??= "retry_window";
+                plog.info(`🔁 ${w.reason}`);
             }
 
             await healthRepo.insertSnapshot(page.id, windowStart, s, action);
