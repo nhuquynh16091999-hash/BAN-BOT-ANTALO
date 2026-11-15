@@ -130,6 +130,8 @@ interface PageInfo {
     activeCustomers: number;
     totalCustomers: number;
     lastSyncedAt: string | null;
+    /** ok · inactivated · no_token · missing · unreachable */
+    pancakeState: string;
 }
 
 interface Customer {
@@ -232,6 +234,43 @@ function Chip({ kind, children }: { kind: "ok" | "warn" | "bad" | "brand" | "mut
     return <span className={`chip chip-${kind}`}>{children}</span>;
 }
 
+// ─── Trạng thái Pancake ───────────────────────────────────────────────────────
+// Hệ thống lấy khách và gửi tin QUA Pancake. Page mà Pancake không cho dùng thì
+// soạn kịch bản vẫn được, nhưng không có khách mới và không gửi được gì — phải
+// nói rõ ngay trên màn hình, kèm việc cần làm, thay vì để người dùng tự đoán.
+const PANCAKE: Record<string, { ten: string; lam: string }> = {
+    inactivated: {
+        ten: "Pancake: bị huỷ kích hoạt",
+        lam: "Gói Pancake của page đã hết nên Pancake ngừng nhận và gửi tin cho page. Gia hạn gói rồi kích hoạt lại page trên Pancake — hệ thống tự nhận lại trong vòng 15 phút.",
+    },
+    no_token: {
+        ten: "Pancake: hết gói",
+        lam: "Pancake không cấp quyền gửi cho page này vì hết gói cước. Gia hạn gói trên Pancake — hệ thống tự nhận lại trong vòng 15 phút.",
+    },
+    missing: {
+        ten: "Không còn trong tài khoản Pancake",
+        lam: "Tài khoản Pancake đang nối với hệ thống không còn thấy page này: page đã bị gỡ khỏi Pancake, hoặc đã chuyển sang tài khoản Pancake khác (khi đó cần token của tài khoản mới).",
+    },
+    unreachable: {
+        ten: "Không kết nối được Pancake",
+        lam: "Token Pancake hết hạn hoặc Pancake đang lỗi. Nếu kéo dài, cần lấy token Pancake mới.",
+    },
+};
+
+function pancakeBlocked(p: { pancakeState: string }): boolean {
+    return p.pancakeState in PANCAKE;
+}
+
+function PancakeChip({ state }: { state: string }) {
+    const info = PANCAKE[state];
+    if (!info) return null;
+    return (
+        <span title={info.lam}>
+            <Chip kind="bad">{info.ten}</Chip>
+        </span>
+    );
+}
+
 function PageStateChip({ p }: { p: { isActive: boolean; health: string } }) {
     if (!p.isActive) return <Chip kind="muted">Đang tắt</Chip>;
     if (p.health === "paused") return <Chip kind="bad">Tạm ngưng</Chip>;
@@ -288,9 +327,16 @@ function OverviewScreen({
             customers: pages.reduce((a, p) => a + p.activeCustomers, 0),
             noScript: pages.filter((p) => !p.hasScript).length,
             paused: pages.filter((p) => p.isActive && p.health === "paused").length,
+            blocked: pages.filter(pancakeBlocked).length,
         }),
         [pages]
     );
+    // Gom page bị Pancake chặn theo lý do, để nói một lần thay vì lặp ở từng dòng
+    const blockedBy = useMemo(() => {
+        const m = new Map<string, number>();
+        for (const p of pages) if (pancakeBlocked(p)) m.set(p.pancakeState, (m.get(p.pancakeState) ?? 0) + 1);
+        return [...m.entries()].sort((a, b) => b[1] - a[1]);
+    }, [pages]);
 
     return (
         <div className="space-y-5">
@@ -308,13 +354,46 @@ function OverviewScreen({
                     hint={totals.noScript ? "chưa gửi được gì" : "đủ cả"}
                     tone={totals.noScript ? "var(--warn)" : undefined}
                 />
-                <Stat
-                    value={num(totals.paused)}
-                    label="Page bị tạm ngưng"
-                    hint={totals.paused ? "Facebook đang siết" : "không có"}
-                    tone={totals.paused ? "var(--bad)" : undefined}
-                />
+                {totals.blocked > 0 ? (
+                    <Stat
+                        value={`${num(totals.blocked)}/${pages.length}`}
+                        label="Page Pancake không cho dùng"
+                        hint="xem lý do bên dưới"
+                        tone="var(--bad)"
+                    />
+                ) : (
+                    <Stat
+                        value={num(totals.paused)}
+                        label="Page bị tạm ngưng"
+                        hint={totals.paused ? "Facebook đang siết" : "không có"}
+                        tone={totals.paused ? "var(--bad)" : undefined}
+                    />
+                )}
             </div>
+
+            {blockedBy.length > 0 && (
+                <div className="panel px-5 py-4" style={{ borderColor: "var(--bad)" }}>
+                    <div className="text-[15px] font-bold" style={{ color: "var(--bad)" }}>
+                        {totals.blocked === pages.length
+                            ? `Cả ${pages.length} page đang không lấy được khách và không gửi được tin`
+                            : `${totals.blocked}/${pages.length} page đang không lấy được khách và không gửi được tin`}
+                    </div>
+                    <p className="mt-1 text-[13px]" style={{ color: "var(--ink-2)" }}>
+                        Hệ thống lấy khách và gửi tin qua Pancake. Soạn kịch bản vẫn làm được, nhưng các page dưới đây
+                        phải xử lý xong trên Pancake thì mới chạy.
+                    </p>
+                    <ul className="mt-2.5 space-y-2 text-[13px]">
+                        {blockedBy.map(([state, n]) => (
+                            <li key={state}>
+                                <b>
+                                    {n} page — {PANCAKE[state]!.ten}
+                                </b>
+                                <div style={{ color: "var(--ink-2)" }}>{PANCAKE[state]!.lam}</div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
 
             <div className="panel overflow-hidden">
                 <div className="flex items-center justify-between border-b px-5 py-3.5" style={{ borderColor: "var(--line)" }}>
@@ -357,6 +436,7 @@ function OverviewScreen({
                                         <td>
                                             <div className="flex flex-wrap items-center gap-1.5">
                                                 <PageStateChip p={p} />
+                                                <PancakeChip state={p.pancakeState} />
                                                 {p.isActive && p.rampPercent < 100 && (
                                                     <Chip kind="warn">khởi động {p.rampPercent}%</Chip>
                                                 )}
@@ -2249,6 +2329,7 @@ export default function App() {
                                 <span style={{ color: "var(--ink-3)" }}> / {num(page.totalCustomers)} trong tệp</span>
                             </span>
                             {!page.hasScript && <Chip kind="warn">chưa có kịch bản</Chip>}
+                            <PancakeChip state={page.pancakeState} />
                             {page.isActive && page.rampPercent < 100 && (
                                 <Chip kind="warn">khởi động dần {page.rampPercent}%</Chip>
                             )}
@@ -2261,6 +2342,17 @@ export default function App() {
             </header>
 
             <main className="mx-auto max-w-[1440px] px-5 py-5">
+                {page && pancakeBlocked(page) && screen !== "tong-quan" && screen !== "theo-doi" && screen !== "tra-cuu" && (
+                    <div className="panel mb-5 px-5 py-3.5" style={{ borderColor: "var(--bad)" }}>
+                        <div className="text-[14px] font-bold" style={{ color: "var(--bad)" }}>
+                            {page.name}: {PANCAKE[page.pancakeState]!.ten}
+                        </div>
+                        <p className="mt-0.5 text-[13px]" style={{ color: "var(--ink-2)" }}>
+                            {PANCAKE[page.pancakeState]!.lam} Trong lúc chờ vẫn soạn và lưu kịch bản được; bật chiến dịch
+                            hay bắn tay thì chưa có tin nào đi.
+                        </p>
+                    </div>
+                )}
                 {screen === "tong-quan" && (
                     <OverviewScreen pages={pages} loading={loadingPages} onPick={goto} />
                 )}

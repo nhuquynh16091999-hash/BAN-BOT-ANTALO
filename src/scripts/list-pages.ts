@@ -7,24 +7,30 @@ import * as customersRepo from "../db/repositories/customers.repo.js";
  * npm run page:list — mọi page Pancake nhìn thấy, đối chiếu với page đã đưa vào hệ thống.
  */
 
+const PANCAKE_LABEL: Record<pancake.PancakePageState, string> = {
+    ok: "✓ dùng được",
+    inactivated: "✗ huỷ k.hoạt",
+    no_token: "✗ hết gói",
+    missing: "✗ không thấy",
+    unreachable: "✗ lỗi kết nối",
+};
+
 async function main(): Promise<void> {
     const [fromPancake, inDb] = await Promise.all([pancake.listPages(), pagesRepo.listAll()]);
     const dbById = new Map(inDb.map((p) => [p.page_id, p]));
 
     console.log(`\n📄 ${fromPancake.length} page từ Pancake · ${inDb.length} page trong hệ thống\n`);
     console.log(
-        "   " + "PAGE ID".padEnd(18) + "TÊN".padEnd(34) + "TOKEN".padEnd(7) + "HỆ THỐNG".padEnd(12) + "THỊ TRƯỜNG".padEnd(10) + "KHÁCH"
+        "   " + "PAGE ID".padEnd(18) + "TÊN".padEnd(34) + "PANCAKE".padEnd(14) + "HỆ THỐNG".padEnd(12) + "KHÁCH"
     );
     console.log("   " + "─".repeat(92));
 
     for (const p of fromPancake) {
         const db = dbById.get(p.pageId);
         let state = "—";
-        let market = "";
         let cust = "";
         if (db) {
             state = !db.is_active ? "tắt" : db.health_state === "ok" ? "🟢 chạy" : db.health_state === "degraded" ? "🟡 chậm" : "🔴 ngưng";
-            market = db.market;
             const s = await customersRepo.stats(db.id);
             cust = `${s.active} active / ${s.total}`;
         }
@@ -32,9 +38,8 @@ async function main(): Promise<void> {
             "   " +
                 p.pageId.padEnd(18) +
                 p.name.slice(0, 32).padEnd(34) +
-                (p.hasToken ? "✓" : "✗").padEnd(7) +
+                PANCAKE_LABEL[p.state].padEnd(14) +
                 state.padEnd(12) +
-                market.padEnd(10) +
                 cust
         );
     }

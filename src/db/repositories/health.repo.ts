@@ -93,3 +93,21 @@ export function recentRuns(limit = 20) {
         [limit]
     );
 }
+
+/**
+ * Xoá nhật ký cũ. job_runs nhận ~1.500 dòng/ngày chỉ riêng job send (mỗi phút
+ * một lượt) — không dọn thì phình vô hạn: sau 6 tuần đã 125.000 dòng, 121MB.
+ */
+export async function pruneOldRuns(jobRunDays: number, healthDays: number): Promise<{ jobRuns: number; health: number }> {
+    const a = await queryOne<{ n: number }>(
+        `WITH d AS (DELETE FROM job_runs WHERE started_at < now() - make_interval(days => $1) RETURNING 1)
+         SELECT count(*)::int AS n FROM d`,
+        [jobRunDays]
+    );
+    const b = await queryOne<{ n: number }>(
+        `WITH d AS (DELETE FROM page_health WHERE window_start < now() - make_interval(days => $1) RETURNING 1)
+         SELECT count(*)::int AS n FROM d`,
+        [healthDays]
+    );
+    return { jobRuns: a?.n ?? 0, health: b?.n ?? 0 };
+}

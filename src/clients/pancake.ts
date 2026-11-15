@@ -29,6 +29,49 @@ interface PancakePage {
     id: string;
     name: string;
     token: string | null;
+    /** Nhóm Pancake xếp page vào: activated · hidden · inactivated · suspended · not_activated… */
+    group: string;
+}
+
+/**
+ * Page dùng được với Pancake không — và nếu không thì vì sao.
+ *
+ *   ok           có token, Pancake đang nhận tin của page
+ *   inactivated  page bị HUỶ KÍCH HOẠT trên Pancake (thường do hết gói): Pancake
+ *                ngừng nhận tin mới, dữ liệu đứng im dù token cũ vẫn còn
+ *   no_token     page còn kích hoạt nhưng Pancake không cấp token (hết gói cước)
+ *   missing      tài khoản của token không còn thấy page này
+ *   unreachable  không gọi được Pancake / Pancake từ chối token
+ */
+export type PancakePageState = "ok" | "inactivated" | "no_token" | "missing" | "unreachable";
+
+type RawPage = { id?: string | number; name?: string; settings?: { page_access_token?: string } };
+
+/**
+ * Đọc MỌI nhóm trong `categorized`, không chỉ vài nhóm quen tên. Tháng 11/2026
+ * Pancake chuyển cả loạt page sang nhóm `inactivated` — code cũ chỉ đọc 4 nhóm
+ * nên tưởng page biến mất và báo sai thành "không lấy được page token".
+ * Phần tử không phải object (vd `activated_page_ids` là mảng id) thì bỏ qua.
+ * Page nằm ở nhiều nhóm → nhóm `activated` thắng.
+ */
+export function parsePages(categorized: Record<string, unknown>): Map<string, PancakePage> {
+    const pages = new Map<string, PancakePage>();
+    for (const [group, list] of Object.entries(categorized)) {
+        if (!Array.isArray(list)) continue;
+        for (const raw of list as RawPage[]) {
+            if (!raw || typeof raw !== "object" || raw.id === undefined || raw.id === null) continue;
+            const id = String(raw.id);
+            if (pages.has(id) && group !== "activated") continue;
+            pages.set(id, { id, name: raw.name ?? `Page ${id}`, token: raw.settings?.page_access_token ?? null, group });
+        }
+    }
+    return pages;
+}
+
+export function stateOf(page: Pick<PancakePage, "token" | "group"> | undefined): PancakePageState {
+    if (!page) return "missing";
+    if (page.group === "inactivated") return "inactivated";
+    return page.token ? "ok" : "no_token";
 }
 
 let pageCache: { pages: Map<string, PancakePage>; expiresAt: number } = {
@@ -55,22 +98,17 @@ async function loadPages(force = false): Promise<Map<string, PancakePage>> {
 
 async function fetchPages(): Promise<Map<string, PancakePage>> {
     const url = `${config.pancake.apiUrl}/pages?access_token=${config.pancake.token}&version=v1`;
-    const data = await fetchJson<{
-        categorized?: Record<string, Array<{ id?: string; name?: string; settings?: { page_access_token?: string } }>>;
-    }>(url, { label: "pancake.pages", timeoutMs: 20_000 });
+    const data = await fetchJson<{ categorized?: Record<string, unknown>; message?: string }>(url, {
+        label: "pancake.pages",
+        timeoutMs: 20_000,
+    });
 
-    const cat = data.categorized ?? {};
-    const all = [...(cat.activated ?? []), ...(cat.hidden ?? []), ...(cat.suspended ?? []), ...(cat.not_activated ?? [])];
-
-    const pages = new Map<string, PancakePage>();
-    for (const p of all) {
-        if (!p.id) continue;
-        pages.set(String(p.id), {
-            id: String(p.id),
-            name: p.name ?? `Page ${p.id}`,
-            token: p.settings?.page_access_token ?? null,
-        });
+    // Không có `categorized` = Pancake không nhận token (hết hạn, bị thu hồi). Phải
+    // ném lỗi: coi như "0 page" thì mọi page sẽ bị báo sai là đã rời tài khoản.
+    if (!data.categorized || typeof data.categorized !== "object") {
+        throw new Error(`Pancake không trả danh sách page${data.message ? ` — ${String(data.message).slice(0, 120)}` : ""} (token hết hạn?)`);
     }
+    const pages = parsePages(data.categorized);
 
     if (pages.size > 0) {
         pageCache = { pages, expiresAt: Date.now() + PAGE_CACHE_MS };
@@ -79,12 +117,28 @@ async function fetchPages(): Promise<Map<string, PancakePage>> {
     return pages;
 }
 
-/** Danh sách page mà token CRM hiện tại nhìn thấy. */
-export async function listPages(): Promise<Array<{ pageId: string; name: string; hasToken: boolean }>> {
+/** Danh sách page mà token CRM hiện tại nhìn thấy (mọi nhóm, kể cả đã huỷ kích hoạt). */
+export async function listPages(): Promise<Array<{ pageId: string; name: string; hasToken: boolean; state: PancakePageState }>> {
     const pages = await loadPages(true);
     return [...pages.values()]
-        .map((p) => ({ pageId: p.id, name: p.name, hasToken: p.token !== null }))
+        .map((p) => ({ pageId: p.id, name: p.name, hasToken: p.token !== null, state: stateOf(p) }))
         .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Trạng thái Pancake của một loạt page — MỘT lần gọi /pages cho tất cả.
+ * Không gọi được Pancake thì mọi page là `unreachable` (không đoán).
+ */
+export async function pageStates(pageIds: readonly string[]): Promise<Map<string, PancakePageState>> {
+    const out = new Map<string, PancakePageState>();
+    let pages: Map<string, PancakePage> | null = null;
+    try {
+        pages = await loadPages(true);
+    } catch (err) {
+        log.error({ err: err instanceof Error ? err.message : String(err) }, "Không lấy được danh sách page từ Pancake");
+    }
+    for (const id of pageIds) out.set(id, pages ? stateOf(pages.get(id)) : "unreachable");
+    return out;
 }
 
 /** Token của một page. forceRefresh dùng khi token cũ vừa trả lỗi 105. */
@@ -95,7 +149,14 @@ export async function getPageToken(pageId: string, forceRefresh = false): Promis
     }
 
     const pages = await loadPages(forceRefresh);
-    const direct = pages.get(pageId)?.token;
+    const known = pages.get(pageId);
+    // Page đã bị huỷ kích hoạt: token cũ vẫn nằm trong danh sách nhưng Pancake
+    // không còn nhận/gửi tin cho page — coi như không có token
+    if (known?.group === "inactivated") {
+        log.warn({ pageId }, "Page đã bị huỷ kích hoạt trên Pancake");
+        return null;
+    }
+    const direct = known?.token;
     if (direct) return direct;
 
     // Dự phòng: gọi endpoint generate (hay lỗi phía Pancake, nhưng đôi khi chạy)

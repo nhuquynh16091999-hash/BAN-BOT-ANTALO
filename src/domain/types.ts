@@ -38,6 +38,9 @@ export interface Page {
     last_quick_synced_at: Date | null;
     /** Múi giờ IANA cho thị trường có giờ mùa hè (vd Europe/Rome); NULL = offset cố định. */
     timezone: string | null;
+    /** ok · inactivated · no_token · missing · unreachable; NULL = chưa kiểm tra */
+    pancake_state: string | null;
+    pancake_checked_at: Date | null;
 }
 
 export interface Script {

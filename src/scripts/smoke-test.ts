@@ -88,7 +88,7 @@ try {
     // ═══ 1. MIGRATION ═══════════════════════════════════════════════════════
     section("Migration");
     const applied = await migrate();
-    eq("Áp dụng đúng 6 file migration", applied, 6);
+    eq("Áp dụng đúng 7 file migration", applied, 7);
     const tables = await query<{ n: number }>(
         `SELECT COUNT(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`
     );
@@ -985,6 +985,77 @@ try {
     check("Hết giờ / pm2 báo dừng → không nhận page mới", started >= 5 && started < 10, `đã bắt đầu ${started}`);
 
     await query(`DELETE FROM pages WHERE page_id IN ('SMOKE_PHONE', 'SMOKE_NOON')`);
+
+    // ═══ PANCAKE ĐỔI TRẠNG THÁI PAGE (sự cố 11/2026) ══════════════════════════
+    section("Pancake huỷ kích hoạt / gỡ page — hệ thống phải biết và nói rõ");
+    const pk = await import("../clients/pancake.js");
+    const parsed = pk.parsePages({
+        activated: [{ id: 111, name: "Page chạy", settings: { page_access_token: "tok-a" } }, { id: "222", name: "Page hết gói", settings: {} }],
+        inactivated: [{ id: "333", name: "Page bị huỷ", settings: { page_access_token: "tok-cu" } }, { id: 111, name: "trùng" }],
+        activated_page_ids: ["111", "222"],   // mảng id, không phải page
+        nopermission: [],
+        hidden: [{ id: "444", name: "Page ẩn", settings: { page_access_token: "tok-d" } }, null],
+    });
+    eq("⭐ Đọc MỌI nhóm của Pancake, kể cả nhóm 'inactivated' mới", [...parsed.keys()].sort(), ["111", "222", "333", "444"]);
+    eq("Mảng id và phần tử rỗng không bị tính là page", parsed.size, 4);
+    eq("Page nằm ở 2 nhóm → nhóm activated thắng", parsed.get("111")?.group, "activated");
+    eq("Trạng thái: page có token, đang kích hoạt → dùng được", pk.stateOf(parsed.get("111")), "ok");
+    eq("⭐ Trạng thái: page bị huỷ kích hoạt → KHÔNG dùng được dù còn token cũ", pk.stateOf(parsed.get("333")), "inactivated");
+    eq("Trạng thái: kích hoạt nhưng không có token → hết gói", pk.stateOf(parsed.get("222")), "no_token");
+    eq("⭐ Trạng thái: page không còn trong tài khoản", pk.stateOf(parsed.get("999")), "missing");
+    eq("Page ẩn nhưng có token vẫn dùng được", pk.stateOf(parsed.get("444")), "ok");
+
+    // Lưu trạng thái + giao diện đọc ra
+    const pkA = await pagesRepo.upsert({ pageId: "SMOKE_PK_OK", pageName: "PK dùng được", market: "Chung", utcOffset: 7 });
+    const pkB = await pagesRepo.upsert({ pageId: "SMOKE_PK_DEAD", pageName: "PK bị huỷ", market: "Chung", utcOffset: 7 });
+    eq("Page mới chưa kiểm tra → trạng thái rỗng", pkA.pancake_state, null);
+    await pagesRepo.setPancakeStates(new Map([[pkA.id, "ok"], [pkB.id, "inactivated"]]));
+    eq("Ghi trạng thái nhiều page một lượt",
+        [(await pagesRepo.findById(pkA.id))?.pancake_state, (await pagesRepo.findById(pkB.id))?.pancake_state], ["ok", "inactivated"]);
+    check("…kèm thời điểm kiểm tra", (await pagesRepo.findById(pkB.id))?.pancake_checked_at instanceof Date);
+
+    // Khách quá hạn phải bị loại dù KHÔNG quét được Pancake
+    const { expireStale } = await import("../jobs/sync.js");
+    await customersRepo.upsertBatch(pkB.id, [
+        { psid: "OLD", conversationId: "c-old", name: "Khách cũ", phone: null, orderCount: 0, tags: [], lastInteractionAt: new Date(now.getTime() - 10 * DAY) },
+        { psid: "NEW", conversationId: "c-new", name: "Khách mới", phone: null, orderCount: 0, tags: [], lastInteractionAt: new Date(now.getTime() - 1 * DAY) },
+    ]);
+    const webPages2 = await import(pathToFileURL(resolve("web/src/lib/pages.ts")).href);
+    const rowBefore = (await webPages2.listPages()).find((r: { page_id: string }) => r.page_id === "SMOKE_PK_DEAD");
+    eq("⭐ Giao diện: 'gửi được' không đếm khách đã quá 7 ngày, kể cả khi chưa kịp loại", [rowBefore?.active_customers, rowBefore?.total_customers], [1, 2]);
+    eq("Giao diện nhận được trạng thái Pancake của page", rowBefore?.pancake_state, "inactivated");
+    const exp2 = await expireStale((await pagesRepo.findById(pkB.id))!);
+    eq("⭐ Loại khách quá hạn chạy được mà không cần Pancake", exp2.outOfWindow, 1);
+    eq("…khách còn hạn giữ nguyên", (await customersRepo.findByPsid(pkB.id, "NEW"))?.status, "active");
+    const pageOrder: string[] = (await webPages2.listPages()).map((r: { page_id: string }) => r.page_id);
+    check("Giao diện xếp page dùng được lên trước page bị Pancake chặn", pageOrder.indexOf("SMOKE_PK_OK") < pageOrder.indexOf("SMOKE_PK_DEAD"));
+
+    // Dọn tàn dư của tính năng đã gỡ
+    const leftovers7 = await query<{ c: string }>(
+        `SELECT table_name || '.' || column_name AS c FROM information_schema.columns
+          WHERE column_name IN ('hours_since_interaction', 'send_window_hours', 'window_narrowed_at')`);
+    eq("Database không còn cột của tính năng 'tự đo cửa sổ' đã gỡ", leftovers7.length, 0);
+
+    // Dọn nhật ký cũ
+    await query(`INSERT INTO job_runs (job, started_at, finished_at, ok) VALUES ('send', now() - interval '9 days', now() - interval '9 days', TRUE), ('send', now() - interval '1 day', now() - interval '1 day', TRUE)`);
+    const beforePrune = (await queryOne<{ n: number }>(`SELECT count(*)::int AS n FROM job_runs`))!.n;
+    const pruned = await healthRepo.pruneOldRuns(7, 30);
+    eq("⭐ Dọn lượt chạy job cũ hơn 7 ngày", pruned.jobRuns, 1);
+    eq("…lượt gần đây giữ nguyên", (await queryOne<{ n: number }>(`SELECT count(*)::int AS n FROM job_runs`))!.n, beforePrune - 1);
+
+    // Nhật ký chạy nền trên giao diện: ẩn lượt gửi rỗng
+    await query(`DELETE FROM job_runs`);
+    await query(
+        `INSERT INTO job_runs (job, started_at, finished_at, ok, stats, error) VALUES
+           ('send', now() - interval '1 minute',  now(), TRUE,  '{"picked":0}', NULL),
+           ('send', now() - interval '2 minutes', now(), TRUE,  '{"picked":5,"sent":5}', NULL),
+           ('send', now() - interval '3 minutes', now(), FALSE, '{}', 'lỗi gửi'),
+           ('sync', now() - interval '4 minutes', now(), TRUE,  '{"scanned":3}', NULL)`);
+    const shownRuns = await webReport.recentJobRuns(30);
+    eq("⭐ Nhật ký chạy nền ẩn lượt gửi rỗng, giữ lượt có gửi / lượt lỗi / lượt quét",
+        shownRuns.map((r: { job: string; ok: boolean }) => `${r.job}:${r.ok}`), ["send:true", "send:false", "sync:true"]);
+
+    await query(`DELETE FROM pages WHERE page_id IN ('SMOKE_PK_OK', 'SMOKE_PK_DEAD')`);
 
     await webDb.pool.end();
     await closePool();

@@ -7,7 +7,8 @@ import { currentUtcOffset } from "../../lib/time.js";
 const COLS = `
     id, page_id, page_name, market, utc_offset, pancake_shop_id, is_active,
     health_state, paused_until, pause_reason, pause_count_24h,
-    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at, timezone
+    activated_at, ramp_percent, last_synced_at, last_planned_at, last_quick_synced_at, timezone,
+    pancake_state, pancake_checked_at
 `;
 
 export function listAll(): Promise<Page[]> {
@@ -124,6 +125,18 @@ export async function syncDstOffsets(at: Date = new Date()): Promise<Array<{ pag
         }
     }
     return changed;
+}
+
+/** Ghi trạng thái Pancake của nhiều page một lượt (job sync gọi mỗi 15 phút). */
+export async function setPancakeStates(states: ReadonlyMap<number, string>): Promise<void> {
+    if (states.size === 0) return;
+    await query(
+        `UPDATE pages p
+            SET pancake_state = v.state, pancake_checked_at = now()
+           FROM unnest($1::bigint[], $2::text[]) AS v(id, state)
+          WHERE p.id = v.id`,
+        [[...states.keys()], [...states.values()]]
+    );
 }
 
 // ─── Sức khoẻ page ────────────────────────────────────────────────────────────

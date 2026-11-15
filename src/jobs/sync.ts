@@ -65,6 +65,26 @@ export function quickSinceSec(page: Page, now: Date = new Date()): number {
     return Math.floor(Math.max(since, floor) / 1000);
 }
 
+/**
+ * Tính lại ngày thứ N và loại khách đã quá cửa sổ / đi hết chuỗi.
+ *
+ * Chỉ đụng database nên chạy được cả khi Pancake không dùng được cho page. Trước
+ * đây bước này nằm trong lượt quét Pancake: quét hỏng là khách quá hạn vẫn mang
+ * trạng thái "đang nhận", giao diện báo "gửi được 184 khách" trong khi thật ra là 0.
+ */
+export async function expireStale(page: Page): Promise<{ outOfWindow: number; journeyDone: number }> {
+    await customersRepo.recomputeJourneyDays(page.id, page.utc_offset);
+    return customersRepo.expireCustomers(page.id, config.journey.windowDays, config.journey.days);
+}
+
+/** Lý do một page không dùng được với Pancake, để ghi log cho người đọc. */
+export const PANCAKE_STATE_LABEL: Record<string, string> = {
+    inactivated: "bị huỷ kích hoạt trên Pancake (hết gói)",
+    no_token: "Pancake không cấp token (hết gói cước)",
+    missing: "không còn trong tài khoản Pancake của token",
+    unreachable: "không gọi được Pancake (token hết hạn?)",
+};
+
 export async function syncPage(
     page: Page,
     log: Logger,
@@ -144,8 +164,7 @@ export async function syncPage(
     }
 
     // 6. Tính lại ngày thứ N rồi loại khách hết hạn
-    await customersRepo.recomputeJourneyDays(page.id, page.utc_offset);
-    const expired = await customersRepo.expireCustomers(page.id, config.journey.windowDays, config.journey.days);
+    const expired = await expireStale(page);
     stats.expiredOutOfWindow = expired.outOfWindow;
     stats.expiredJourneyDone = expired.journeyDone;
 
@@ -184,21 +203,52 @@ if (isMain(import.meta.url)) {
             log.info(c, `🕐 ${c.page_name} đổi giờ: UTC${c.from >= 0 ? "+" : ""}${c.from} → UTC${c.to >= 0 ? "+" : ""}${c.to}`);
         }
 
+        // Trạng thái Pancake của MỌI page, một lần gọi. Page không dùng được thì
+        // bỏ qua hẳn (không ghi 96 dòng lỗi mỗi ngày cho mỗi page) nhưng vẫn loại
+        // khách quá hạn, và lý do được lưu lại để giao diện hiện ra.
+        const all = await pagesRepo.listAll();
+        const states = await pancake.pageStates(all.map((p) => p.page_id));
+        for (const p of all) {
+            // Page đang bật mà danh sách không kèm token: thử xin token trước khi kết luận
+            if (states.get(p.page_id) === "no_token" && p.is_active && (await pancake.getPageToken(p.page_id).catch(() => null))) {
+                states.set(p.page_id, "ok");
+            }
+        }
+        const usable = (p: Page) => states.get(p.page_id) === "ok";
+
+        if (!args.dryRun) {
+            await pagesRepo.setPancakeStates(new Map(all.map((p) => [p.id, states.get(p.page_id) ?? "unreachable"])));
+            for (const p of all.filter((x) => !usable(x))) await expireStale(p);
+        }
+        const blocked: Record<string, number> = {};
+        for (const p of all) {
+            const st = states.get(p.page_id) ?? "unreachable";
+            if (st !== "ok") blocked[st] = (blocked[st] ?? 0) + 1;
+        }
+        if (Object.keys(blocked).length > 0) {
+            log.warn({ ...blocked, total: all.length }, "Có page không dùng được với Pancake — bỏ qua, xem lý do trên giao diện");
+        }
+
         let work: Array<{ page: Page; mode: SyncMode }>;
         if (args.page) {
-            const p = await pagesRepo.findByFbPageId(args.page);
+            const p = all.find((x) => x.page_id === args.page);
             if (!p) {
                 log.error(`Không tìm thấy page ${args.page} — thêm bằng npm run page:add`);
                 process.exitCode = 1;
                 return;
             }
+            if (!usable(p)) {
+                log.error(`Page ${p.page_name}: ${PANCAKE_STATE_LABEL[states.get(p.page_id) ?? "unreachable"]} — không quét được`);
+                process.exitCode = 1;
+                return;
+            }
             work = [{ page: p, mode: "full" }]; // chỉ định page cụ thể = luôn quét đầy đủ, bất kể giờ
         } else {
-            // Page bật + page TẮT đã từng quét được: page tắt vẫn cần tệp khách mới
-            // để bắn tay (vd gửi thử cho chính mình). Page tắt chưa quét lần nào
-            // thường là page hết gói Pancake — bỏ qua, không thì mỗi 15 phút lại
-            // ghi một dòng lỗi. Page tắt chỉ được quét, KHÔNG xếp lịch gửi.
-            const candidates = (await pagesRepo.listAll()).filter((p) => p.is_active || p.last_synced_at !== null);
+            // Mọi page Pancake còn dùng được, kể cả page đang TẮT: page tắt vẫn cần
+            // tệp khách mới để soạn kịch bản và bắn tay. Page tắt chỉ được quét,
+            // KHÔNG xếp lịch gửi. Page chưa quét lần nào được quét đầy đủ ngay —
+            // nhờ vậy page vừa gia hạn gói trên Pancake tự có khách sau ≤ 15 phút.
+            const candidates = all.filter(usable);
             work = candidates
                 .map((page) => ({
                     page,
@@ -206,7 +256,7 @@ if (isMain(import.meta.url)) {
                 }))
                 .filter((w) => w.mode === "full" || config.sync.quickEnabled);
             if (work.length === 0) {
-                log.info({ pages: candidates.length }, "Không có page nào cần đồng bộ");
+                log.info({ pages: all.length, usable: candidates.length }, "Không có page nào cần đồng bộ");
                 return;
             }
         }

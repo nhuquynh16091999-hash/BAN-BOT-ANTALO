@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
                     activeCustomers: Number(p.active_customers),
                     totalCustomers: Number(p.total_customers),
                     lastSyncedAt: p.last_synced_at ? p.last_synced_at.toISOString() : null,
+                    pancakeState: p.pancake_state ?? "ok",
                 })),
                 shopName: "Tất cả",
                 totalPages: rows.length,

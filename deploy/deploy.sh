@@ -29,7 +29,10 @@ rm -rf dist && npm run build
 
 echo "▶ Đẩy engine lên $HOST:$DIR…"
 rsync -az --delete ./dist "$HOST:$DIR/"
-rsync -az ./migrations ./kich-ban ./deploy ./docs ./package.json ./package-lock.json ./ecosystem.config.cjs ./README.md "$HOST:$DIR/"
+# migrations PHẢI --delete: file migration của tính năng đã gỡ mà còn sót trên
+# server sẽ bị chạy lại ở lần deploy sau (đã xảy ra với 007 tháng 10/2026).
+rsync -az --delete ./migrations "$HOST:$DIR/"
+rsync -az ./kich-ban ./deploy ./docs ./package.json ./package-lock.json ./ecosystem.config.cjs ./README.md "$HOST:$DIR/"
 
 echo "▶ Đẩy giao diện (đã build sẵn)…"
 # Bỏ node_modules của mã nguồn (server tự cài) nhưng GIỮ web/.next/node_modules:

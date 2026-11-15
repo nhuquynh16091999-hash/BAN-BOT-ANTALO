@@ -127,6 +127,33 @@ rm /etc/nginx/conf.d/banbot.conf && systemctl reload nginx
 # dữ liệu vẫn còn trong database banbot — xoá riêng nếu muốn: dropdb banbot
 ```
 
+## Khi page không có khách / không gửi được — xem Pancake trước
+
+Hệ thống lấy khách và gửi tin **qua Pancake**. Mỗi 15 phút job sync hỏi Pancake
+trạng thái từng page, lưu vào `pages.pancake_state`, và màn **Tổng quan** hiện
+lý do bằng chữ:
+
+| Trạng thái | Nghĩa là | Ai xử lý |
+|---|---|---|
+| `ok` | dùng được | — |
+| `inactivated` | page bị huỷ kích hoạt trên Pancake (hết gói) — Pancake ngừng nhận tin, dữ liệu đứng im | gia hạn gói + kích hoạt lại page trên Pancake |
+| `no_token` | page còn kích hoạt nhưng Pancake không cấp token (hết gói) | gia hạn gói trên Pancake |
+| `missing` | tài khoản của token không còn thấy page | thêm lại page vào tài khoản, hoặc đổi sang token của tài khoản đang giữ page |
+| `unreachable` | không gọi được Pancake / token bị từ chối | lấy token mới, sửa `PANCAKE_CRM_TOKEN` trong `/opt/banbot/.env` |
+
+Page không `ok` thì job bỏ qua (không ghi lỗi mỗi 15 phút) và tự chạy lại ngay
+khi Pancake cho dùng — kể cả page chưa quét lần nào. Xem nhanh bằng lệnh:
+`node dist/scripts/list-pages.js`.
+
+**Token Pancake có hạn 90 ngày** (token hiện tại hết hạn 24/12/2026). Hết hạn
+thì mọi page thành `unreachable`.
+
+*Sự cố 11/2026:* Pancake chuyển 20 page sang nhóm `inactivated`, 17 page rời tài
+khoản. Code cũ chỉ đọc 4 nhóm quen tên nên báo sai thành "không lấy được page
+token", ghi 2.300 dòng lỗi/ngày (bảng `job_runs` phình 121MB) và giao diện vẫn
+báo "gửi được 184 khách". Nay: đọc mọi nhóm, nhật ký tự dọn sau 7 ngày, khách
+quá hạn được loại cả khi không quét được Pancake.
+
 ## Bật lại đăng nhập
 
 Web đang mở không đăng nhập theo lựa chọn của chủ dự án. Muốn khoá lại:

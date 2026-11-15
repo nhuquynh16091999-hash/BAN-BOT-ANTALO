@@ -15,29 +15,39 @@ export interface PageRow {
     active_customers: number;
     total_customers: number;
     has_script: boolean;
+    /** ok · inactivated · no_token · missing · unreachable; null = chưa kiểm tra */
+    pancake_state: string | null;
 }
+
+/** Cửa sổ Facebook cho chủ động nhắn (ngày) — khớp SEND_WINDOW_DAYS của engine. */
+export const WINDOW_DAYS = Math.min(7, Math.max(1, Number(process.env.SEND_WINDOW_DAYS) || 7));
 
 export function listPages(): Promise<PageRow[]> {
     return query<PageRow>(
         `SELECT p.id, p.page_id, p.page_name, p.market, p.utc_offset, p.is_active,
-                p.health_state, p.paused_until, p.ramp_percent, p.last_synced_at,
+                p.health_state, p.paused_until, p.ramp_percent, p.last_synced_at, p.pancake_state,
                 COALESCE(c.active, 0) AS active_customers,
                 COALESCE(c.total, 0)  AS total_customers,
                 EXISTS (SELECT 1 FROM scripts s WHERE s.page_id = p.id AND s.is_active) AS has_script
            FROM pages p
            LEFT JOIN LATERAL (
-                SELECT COUNT(*) FILTER (WHERE status = 'active')::int AS active,
+                -- "gửi được" = đang trong chuỗi VÀ thật sự còn trong cửa sổ. Không chỉ
+                -- tin cột status: job quét mà hỏng thì khách quá hạn chưa kịp bị loại.
+                SELECT COUNT(*) FILTER (WHERE status = 'active'
+                                          AND last_interaction_at > now() - make_interval(days => $1))::int AS active,
                        COUNT(*)::int AS total
                   FROM customers WHERE page_id = p.id
            ) c ON TRUE
-          ORDER BY p.is_active DESC, p.page_name`
+          -- Page Pancake còn dùng được lên trước, trong đó page đang bật lên đầu
+          ORDER BY (COALESCE(p.pancake_state, 'ok') = 'ok') DESC, p.is_active DESC, c.active DESC NULLS LAST, p.page_name`,
+        [WINDOW_DAYS]
     );
 }
 
 export function findPage(fbPageId: string): Promise<PageRow | null> {
     return queryOne<PageRow>(
         `SELECT p.id, p.page_id, p.page_name, p.market, p.utc_offset, p.is_active,
-                p.health_state, p.paused_until, p.ramp_percent, p.last_synced_at,
+                p.health_state, p.paused_until, p.ramp_percent, p.last_synced_at, p.pancake_state,
                 0 AS active_customers, 0 AS total_customers, FALSE AS has_script
            FROM pages p WHERE p.page_id = $1`,
         [fbPageId]

@@ -165,6 +165,9 @@ export function recentJobRuns(limit = 30) {
     }>(
         `SELECT r.job, p.page_name, r.started_at, r.finished_at, r.ok, r.stats, r.error
            FROM job_runs r LEFT JOIN pages p ON p.id = r.page_id
+          -- Job gửi chạy mỗi phút; lượt không có gì để gửi thì ẩn, không thì 30 dòng
+          -- mới nhất toàn "Gửi tin · 0" và không bao giờ thấy lượt quét hay lượt lỗi.
+          WHERE NOT (r.job = 'send' AND r.ok IS TRUE AND COALESCE((r.stats->>'picked')::int, 0) = 0)
           ORDER BY r.started_at DESC LIMIT $1`,
         [limit]
     );

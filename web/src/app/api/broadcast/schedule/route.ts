@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAppKey } from "@/lib/auth";
 import { query, queryOne, iso } from "@/lib/db";
+import { WINDOW_DAYS } from "@/lib/pages";
 
 /**
  * Danh sách "lịch" cho giao diện.
@@ -41,11 +42,12 @@ export async function GET(req: NextRequest) {
         const rows = await query<Row>(
             `SELECT p.id AS page_id, p.page_id AS fb_page_id, p.page_name, p.market,
                     p.is_active, p.health_state, p.ramp_percent, p.last_synced_at,
-                    (SELECT COUNT(*)::int FROM customers c WHERE c.page_id = p.id AND c.status = 'active') AS active_customers,
+                    (SELECT COUNT(*)::int FROM customers c WHERE c.page_id = p.id AND c.status = 'active' AND c.last_interaction_at > now() - make_interval(days => $1)) AS active_customers,
                     s.id AS script_id, s.name AS script_name
                FROM pages p
                LEFT JOIN scripts s ON s.page_id = p.id AND s.is_active
-              ORDER BY p.is_active DESC, p.page_name`
+              ORDER BY p.is_active DESC, p.page_name`,
+            [WINDOW_DAYS]
         );
 
         const schedules = await Promise.all(rows.map(async (r) => {

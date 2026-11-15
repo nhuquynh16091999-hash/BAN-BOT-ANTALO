@@ -69,7 +69,7 @@ Dùng cho máy dev; trên VPS dùng Postgres cài đặt thật.
 ## Kiểm tra
 
 ```bash
-npm run test:smoke          # 271 kiểm tra tích hợp trên Postgres nhúng tạm
+npm run test:smoke          # 304 kiểm tra tích hợp trên Postgres nhúng tạm
 ```
 
 Bộ kiểm tra dựng DB sạch, chạy migration, rồi đi qua đúng luồng SYNC → PLAN → SEND →
@@ -271,7 +271,7 @@ src/clients/                 pancake.ts (quét + gửi chính) · facebook.ts (d
 src/db/                      pool · migrate · repositories/ (pages, customers, scripts, queue, health)
 src/jobs/                    sync · plan · send · pos · health · webhook
 src/scripts/                 check-db · check-tokens · page:add · page:list · script:seed
-                             smoke-test.ts (271 kiểm tra) · dev-db.ts · seed-demo.ts
+                             smoke-test.ts (304 kiểm tra) · dev-db.ts · seed-demo.ts
 config/                      pos-shops.json (gitignore, chép từ .example) — khoá POS từng shop
 kich-ban/                    nội dung kịch bản (mau.json là khung)
 deploy/                      deploy.sh · mo-cong.sh (mở cổng + bật nginx) · SERVER.md · crontab + systemd mẫu

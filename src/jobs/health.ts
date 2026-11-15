@@ -35,6 +35,10 @@ runJob("health", async (args, log) => {
         const released = await pagesRepo.releaseExpiredPauses();
         stats.released = released.length;
 
+        // Dọn nhật ký cũ: lượt chạy job giữ 7 ngày, ảnh chụp sức khoẻ giữ 30 ngày
+        const pruned = await healthRepo.pruneOldRuns(7, 30);
+        if (pruned.jobRuns + pruned.health > 0) log.info(pruned, "Đã dọn nhật ký cũ");
+
         // Đầu ngày UTC: reset bộ đếm ngưng 24h
         if (now.getUTCHours() === 0 && now.getUTCMinutes() < 15) {
             await pagesRepo.resetPauseCounters();
